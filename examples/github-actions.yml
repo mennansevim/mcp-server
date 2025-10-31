@@ -1,0 +1,63 @@
+# GitHub Actions - AI Code Review
+# Add this to .github/workflows/code-review.yml
+
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get PR diff
+        id: diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+      
+      - name: Trigger AI Review
+        run: |
+          curl -X POST ${{ secrets.REVIEW_SERVER_URL }}/webhook \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.REVIEW_SERVER_TOKEN }}" \
+            -H "X-GitHub-Event: pull_request" \
+            -d @- <<EOF
+          {
+            "action": "opened",
+            "pull_request": {
+              "number": ${{ github.event.pull_request.number }},
+              "html_url": "${{ github.event.pull_request.html_url }}",
+              "diff_url": "${{ github.event.pull_request.diff_url }}",
+              "title": "${{ github.event.pull_request.title }}",
+              "body": "${{ github.event.pull_request.body }}",
+              "user": {
+                "login": "${{ github.event.pull_request.user.login }}"
+              },
+              "head": {
+                "ref": "${{ github.head_ref }}",
+                "sha": "${{ github.event.pull_request.head.sha }}"
+              },
+              "base": {
+                "ref": "${{ github.base_ref }}"
+              },
+              "additions": ${{ github.event.pull_request.additions }},
+              "deletions": ${{ github.event.pull_request.deletions }}
+            },
+            "repository": {
+              "full_name": "${{ github.repository }}",
+              "id": ${{ github.repository_id }}
+            }
+          }
+          EOF
+      
+      - name: Review Complete
+        run: echo "AI Code Review completed successfully"
+

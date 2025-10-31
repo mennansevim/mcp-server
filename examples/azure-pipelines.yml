@@ -1,0 +1,59 @@
+# Azure Pipelines - AI Code Review
+# Add this to azure-pipelines.yml
+
+trigger: none
+
+pr:
+  - main
+  - master
+  - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- checkout: self
+  fetchDepth: 0
+
+- script: |
+    git fetch origin $(System.PullRequest.TargetBranch)
+    git diff origin/$(System.PullRequest.TargetBranch)...HEAD > pr_diff.txt
+  displayName: 'Get PR diff'
+
+- script: |
+    curl -X POST $(REVIEW_SERVER_URL)/webhook \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $(REVIEW_SERVER_TOKEN)" \
+      -H "X-VSS-ActivityId: $(Build.BuildId)" \
+      -d @- <<EOF
+    {
+      "eventType": "git.pullrequest.created",
+      "resource": {
+        "pullRequestId": $(System.PullRequest.PullRequestId),
+        "url": "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_git/$(Build.Repository.Name)/pullrequest/$(System.PullRequest.PullRequestId)",
+        "title": "$(System.PullRequest.Title)",
+        "description": "$(System.PullRequest.Description)",
+        "sourceRefName": "refs/heads/$(System.PullRequest.SourceBranch)",
+        "targetRefName": "refs/heads/$(System.PullRequest.TargetBranch)",
+        "createdBy": {
+          "uniqueName": "$(Build.RequestedFor)"
+        },
+        "repository": {
+          "id": "$(Build.Repository.ID)",
+          "name": "$(Build.Repository.Name)",
+          "project": {
+            "id": "$(System.TeamProjectId)",
+            "name": "$(System.TeamProject)"
+          }
+        }
+      }
+    }
+    EOF
+  displayName: 'Trigger AI Code Review'
+  env:
+    REVIEW_SERVER_URL: $(REVIEW_SERVER_URL)
+    REVIEW_SERVER_TOKEN: $(REVIEW_SERVER_TOKEN)
+
+- script: echo "AI Code Review completed"
+  displayName: 'Review Complete'
+

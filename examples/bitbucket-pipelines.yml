@@ -1,0 +1,58 @@
+# Bitbucket Pipelines - AI Code Review
+# Add this to your bitbucket-pipelines.yml
+
+image: atlassian/default-image:3
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: AI Code Review
+          script:
+            # Get diff
+            - git fetch origin $BITBUCKET_PR_DESTINATION_BRANCH
+            - git diff origin/$BITBUCKET_PR_DESTINATION_BRANCH...HEAD > /tmp/pr_diff.txt
+            
+            # Call review server
+            - |
+              curl -X POST $REVIEW_SERVER_URL/webhook \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $REVIEW_SERVER_TOKEN" \
+                -H "X-Event-Key: pullrequest:created" \
+                -d @- <<EOF
+              {
+                "pullrequest": {
+                  "id": $BITBUCKET_PR_ID,
+                  "title": "$BITBUCKET_PR_TITLE",
+                  "description": "$BITBUCKET_PR_DESCRIPTION",
+                  "links": {
+                    "html": {
+                      "href": "$BITBUCKET_PR_URL"
+                    }
+                  },
+                  "source": {
+                    "branch": {
+                      "name": "$BITBUCKET_BRANCH"
+                    }
+                  },
+                  "destination": {
+                    "branch": {
+                      "name": "$BITBUCKET_PR_DESTINATION_BRANCH"
+                    }
+                  },
+                  "author": {
+                    "username": "$BITBUCKET_PR_AUTHOR"
+                  }
+                },
+                "repository": {
+                  "full_name": "$BITBUCKET_REPO_FULL_NAME",
+                  "uuid": "$BITBUCKET_REPO_UUID",
+                  "workspace": {
+                    "slug": "$BITBUCKET_WORKSPACE"
+                  }
+                }
+              }
+              EOF
+            
+            - echo "AI Code Review completed"
+

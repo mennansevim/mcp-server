@@ -1,0 +1,51 @@
+# GitLab CI/CD - AI Code Review
+# Add this to your .gitlab-ci.yml
+
+ai-code-review:
+  stage: test
+  image: alpine:latest
+  only:
+    - merge_requests
+  
+  before_script:
+    - apk add --no-cache curl git jq
+  
+  script:
+    # Get MR diff
+    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD > mr_diff.txt
+    
+    # Trigger AI review
+    - |
+      curl -X POST $REVIEW_SERVER_URL/webhook \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $REVIEW_SERVER_TOKEN" \
+        -H "X-Gitlab-Event: Merge Request Hook" \
+        -d @- <<EOF
+      {
+        "object_kind": "merge_request",
+        "object_attributes": {
+          "id": $CI_MERGE_REQUEST_IID,
+          "iid": $CI_MERGE_REQUEST_IID,
+          "title": "$CI_MERGE_REQUEST_TITLE",
+          "description": "$CI_MERGE_REQUEST_DESCRIPTION",
+          "source_branch": "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME",
+          "target_branch": "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+          "url": "$CI_MERGE_REQUEST_PROJECT_URL/-/merge_requests/$CI_MERGE_REQUEST_IID",
+          "action": "open",
+          "author": {
+            "username": "$GITLAB_USER_LOGIN"
+          },
+          "last_commit": {
+            "id": "$CI_COMMIT_SHA"
+          }
+        },
+        "project": {
+          "id": $CI_PROJECT_ID,
+          "path_with_namespace": "$CI_PROJECT_PATH"
+        }
+      }
+      EOF
+    
+    - echo "AI Code Review completed"
+

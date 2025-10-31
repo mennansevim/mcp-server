@@ -1,0 +1,29 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Trigger AI Review
+        env:
+          # Repository Secrets'a ekleyin:
+          # REVIEW_SERVER_URL = https://your-ngrok-or-server.com
+          WEBHOOK_URL: ${{ secrets.REVIEW_SERVER_URL }}/webhook
+        run: |
+          # GitHub Event payload'ını MCP Server'a gönder
+          curl -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Event: pull_request" \
+            -H "X-GitHub-Delivery: ${{ github.run_id }}" \
+            -d "$GITHUB_EVENT_PAYLOAD"
+        env:
+          GITHUB_EVENT_PAYLOAD: ${{ toJSON(github.event) }}
+

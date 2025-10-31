@@ -1,0 +1,85 @@
+# MCP Code Review Server Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  
+mcp:
+  name: "code-review-server"
+  version: "1.0.0"
+  description: "AI-powered code review server with platform integration"
+
+# AI Provider Configuration
+ai:
+  provider: "groq"  # openai, anthropic, groq
+  model: "llama-3.3-70b-versatile"
+  # Groq models: llama-3.3-70b-versatile, llama-3.1-70b-versatile, mixtral-8x7b-32768
+  # model: "claude-3-5-sonnet-20241022"
+  # model: "gpt-4-turbo-preview"
+  temperature: 0.3
+  max_tokens: 4096
+
+# Platform Authentication (use environment variables for secrets)
+platforms:
+  github:
+    enabled: true
+    # GITHUB_TOKEN environment variable required
+    api_url: "https://api.github.com"
+    
+  gitlab:
+    enabled: true
+    # GITLAB_TOKEN environment variable required
+    api_url: "https://gitlab.com/api/v4"
+    
+  bitbucket:
+    enabled: true
+    # BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD required
+    api_url: "https://api.bitbucket.org/2.0"
+    
+  azure:
+    enabled: true
+    # AZURE_DEVOPS_PAT and AZURE_DEVOPS_ORG required
+    api_url: "https://dev.azure.com"
+
+# Review Configuration
+review:
+  # Comment strategies: inline, summary, both
+  comment_strategy: "both"
+  
+  # Severity levels to report
+  report_levels:
+    - critical
+    - high
+    - medium
+    # - low
+    # - info
+  
+  # Auto-approve PRs with no issues
+  auto_approve: false
+  
+  # Block PR merge on critical issues
+  block_on_critical: true
+  
+  # Review focus areas
+  focus:
+    - security
+    - performance
+    - bugs
+    - code_quality
+    - best_practices
+
+# Webhook Configuration
+webhook:
+  # Secret for webhook verification
+  # WEBHOOK_SECRET environment variable required
+  verify_signature: true
+  
+  # Timeout for review process (seconds)
+  timeout: 300
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "json"  # json, console
+
