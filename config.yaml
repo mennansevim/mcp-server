@@ -63,6 +63,7 @@ review:
   
   # Review focus areas
   focus:
+    - compilation       # Syntax/build errors (CRITICAL)
     - security
     - performance
     - bugs

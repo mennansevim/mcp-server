@@ -53,3 +53,4 @@ htmlcov/
 GITHUB_TOKEN_SETUP.md
 
 
+.env.backup

@@ -4,7 +4,8 @@ AI-powered code review using OpenAI, Anthropic, or Groq
 import os
 import json
 import structlog
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Dict
 from anthropic import Anthropic
 from openai import OpenAI
 from groq import Groq
@@ -13,11 +14,26 @@ from models import ReviewResult, ReviewIssue, IssueSeverity
 
 logger = structlog.get_logger()
 
+# Rules directory
+RULES_DIR = Path(__file__).parent.parent / "rules"
+
 
 class AIReviewer:
     """AI-powered code reviewer"""
     
-    REVIEW_PROMPT = """You are an expert code reviewer. Analyze the following code changes and provide detailed feedback.
+    # Mapping of focus areas to rule files
+    RULE_FILES = {
+        "compilation": "compilation.md",
+        "security": "security.md",
+        "performance": "performance.md",
+        "dotnet": "dotnet-fundamentals.md",
+        "dotnet_fundamentals": "dotnet-fundamentals.md",
+        "best_practices": "best-practices.md",
+        "code_quality": "best-practices.md",
+        "bugs": "compilation.md",  # Bugs often cause compilation issues
+    }
+    
+    REVIEW_PROMPT = """You are an expert code reviewer with deep knowledge of multiple programming languages. Analyze the following code changes and provide detailed, critical feedback.
 
 Focus areas: {focus_areas}
 
@@ -27,32 +43,52 @@ Code diff:
 Files changed:
 {files}
 
-Provide your review in JSON format with the following structure:
+**CRITICAL CHECKS (Must verify):**
+1. **COMPILATION/SYNTAX ERRORS**: Will this code compile/run? Check for:
+   - Missing/removed keywords (static, const, var, let, etc.)
+   - Syntax errors and typos
+   - Type mismatches
+   - Missing imports/dependencies
+   - Breaking changes (removed methods, changed signatures)
+
+2. **LOGIC ERRORS**: 
+   - Will the code behave as intended?
+   - Are there edge cases not handled?
+   - Could this cause runtime errors?
+
+3. **SECURITY VULNERABILITIES**:
+   - SQL injection, XSS, CSRF risks
+   - Exposed secrets or credentials
+   - Unsafe deserialization
+
+4. **CODE QUALITY**:
+   - Best practices violated
+   - Performance issues
+   - Maintainability concerns
+
+**If code has compilation/syntax errors or will break the build, mark as CRITICAL and set block_merge=true.**
+
+Provide your review in JSON format:
 {{
-    "summary": "Brief overview of the changes and overall quality",
-    "score": 8,
+    "summary": "Brief overview - ALWAYS mention if code won't compile/run",
+    "score": 3,
     "issues": [
         {{
             "severity": "critical|high|medium|low|info",
             "title": "Short issue title",
-            "description": "Detailed description",
+            "description": "Detailed description with impact",
             "file_path": "path/to/file.py",
             "line_number": 42,
             "code_snippet": "problematic code",
-            "suggestion": "how to fix",
-            "category": "security|performance|bug|style|best_practices"
+            "suggestion": "how to fix with example",
+            "category": "compilation|security|performance|bug|style|best_practices"
         }}
     ],
-    "approval_recommended": true,
-    "block_merge": false
+    "approval_recommended": false,
+    "block_merge": true
 }}
 
-Be specific, constructive, and focus on:
-- Security vulnerabilities
-- Performance issues
-- Bugs and logic errors
-- Code quality and best practices
-- Potential edge cases
+Be specific, constructive, and CRITICAL. Better to flag false positives than miss real issues.
 """
     
     def __init__(self, provider: str = "anthropic", model: Optional[str] = None):
@@ -73,6 +109,29 @@ Be specific, constructive, and focus on:
         
         logger.info("ai_reviewer_initialized", provider=self.provider, model=self.model)
     
+    def _load_rules(self, focus_areas: List[str]) -> str:
+        """Load relevant rules based on focus areas"""
+        rules_content = []
+        loaded_files = set()
+        
+        for area in focus_areas:
+            rule_file = self.RULE_FILES.get(area.lower())
+            if rule_file and rule_file not in loaded_files:
+                rule_path = RULES_DIR / rule_file
+                if rule_path.exists():
+                    try:
+                        with open(rule_path, 'r') as f:
+                            content = f.read()
+                            rules_content.append(f"\n## Rules for: {area.upper()}\n{content}")
+                            loaded_files.add(rule_file)
+                            logger.info("loaded_rules", area=area, file=rule_file)
+                    except Exception as e:
+                        logger.warning("failed_to_load_rules", area=area, error=str(e))
+        
+        if rules_content:
+            return "\n\n".join(rules_content)
+        return ""
+    
     async def review(
         self,
         diff: str,
@@ -91,13 +150,26 @@ Be specific, constructive, and focus on:
             ReviewResult with findings
         """
         try:
-            prompt = self.REVIEW_PROMPT.format(
-                focus_areas=", ".join(focus_areas),
-                diff=diff[:10000],  # Limit diff size
-                files="\n".join(files_changed)
-            )
+            # Load relevant rules
+            rules = self._load_rules(focus_areas)
             
-            logger.info("requesting_ai_review", provider=self.provider, files_count=len(files_changed))
+            # Build enhanced prompt with rules
+            prompt_parts = [
+                self.REVIEW_PROMPT.format(
+                    focus_areas=", ".join(focus_areas),
+                    diff=diff[:10000],  # Limit diff size
+                    files="\n".join(files_changed)
+                )
+            ]
+            
+            if rules:
+                prompt_parts.append("\n---\n## SPECIFIC RULES TO FOLLOW:\n")
+                prompt_parts.append(rules[:15000])  # Limit rules size
+                prompt_parts.append("\n---\nApply these rules strictly when reviewing the code above.")
+            
+            prompt = "\n".join(prompt_parts)
+            
+            logger.info("requesting_ai_review", provider=self.provider, files_count=len(files_changed), rules_loaded=bool(rules))
             
             if self.provider == "anthropic":
                 response = await self._review_with_anthropic(prompt)
