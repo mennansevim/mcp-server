@@ -11,7 +11,7 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 echo -e "${BLUE}🔍 Mevcut durumu kontrol ediyorum...${NC}"
@@ -40,7 +40,7 @@ fi
 # Yeni image build et
 echo -e "${YELLOW}🔨 Yeni image build ediliyor...${NC}"
 echo ""
-podman build -t mcp-code-review:latest . 
+podman build -f docker/Dockerfile -t mcp-code-review:latest . 
 
 if [ $? -ne 0 ]; then
     echo ""

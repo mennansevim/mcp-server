@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Trigger AI Review
         env:
-          WEBHOOK_URL: https://setaceous-shriekingly-soo.ngrok-free.dev/webhook
+          WEBHOOK_URL: $MCP_SERVER_URL/webhook
         run: |
           curl -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
