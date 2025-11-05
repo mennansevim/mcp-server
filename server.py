@@ -104,60 +104,121 @@ class CodeReviewServer:
         Returns:
             Response dict
         """
+        print("\n" + "="*80)
+        print("🔔 WEBHOOK RECEIVED")
+        print("="*80)
+        
         # Parse webhook
         pr_data = await self.webhook_handler.handle(request)
         
         if not pr_data:
+            print("⚠️  Ignored: Not a PR event or unsupported platform")
+            print("="*80 + "\n")
             return {"status": "ignored", "message": "Not a PR event or unsupported platform"}
+        
+        print(f"📦 Platform: {pr_data.platform.value.upper()}")
+        print(f"🔗 PR #{pr_data.pr_id}: {pr_data.title}")
+        print(f"👤 Author: {pr_data.author}")
+        print(f"🌿 {pr_data.source_branch} → {pr_data.target_branch}")
+        print("-"*80)
         
         logger.info("processing_webhook", platform=pr_data.platform.value, pr_id=pr_data.pr_id)
         
         # Get platform adapter
         adapter = self.adapters.get(pr_data.platform)
         if not adapter:
+            print(f"❌ ERROR: No adapter available for {pr_data.platform.value}")
+            print("="*80 + "\n")
             logger.error("no_adapter_available", platform=pr_data.platform.value)
             return {"status": "error", "message": "Platform adapter not available"}
         
         try:
             # Fetch actual diff
+            print("📥 Step 1/5: Fetching diff from platform...")
             diff = await adapter.fetch_diff(pr_data)
             if not diff:
+                print("❌ Failed to fetch diff")
+                print("="*80 + "\n")
                 logger.warning("no_diff_fetched", pr_id=pr_data.pr_id)
                 return {"status": "error", "message": "Failed to fetch diff"}
+            print(f"✅ Diff fetched successfully ({len(diff)} bytes)")
+            print()
             
             pr_data.diff = diff
             
             # Analyze diff
+            print("🔍 Step 2/5: Analyzing diff...")
             diff_info = self.diff_analyzer.parse_diff(diff)
             pr_data.files_changed = [f['path'] for f in diff_info['files']]
+            print(f"✅ Found {len(pr_data.files_changed)} changed file(s):")
+            for file in pr_data.files_changed[:5]:  # Show first 5
+                print(f"   📄 {file}")
+            if len(pr_data.files_changed) > 5:
+                print(f"   ... and {len(pr_data.files_changed) - 5} more")
+            print()
             
             # Perform AI review
+            print("🤖 Step 3/5: Starting AI code review...")
             review_config = self.config['review']
+            print(f"   Provider: {self.config['ai']['provider'].upper()}")
+            print(f"   Model: {self.config['ai']['model']}")
+            print(f"   Focus areas: {', '.join(review_config.get('focus', []))}")
+            print()
+            
             review_result = await self.ai_reviewer.review(
                 diff=diff,
                 files_changed=pr_data.files_changed,
                 focus_areas=review_config.get('focus', [])
             )
             
+            print(f"✅ AI Review completed!")
+            print(f"   Score: {review_result.score}/10")
+            print(f"   Issues: {review_result.total_issues} total")
+            if review_result.critical_count > 0:
+                print(f"   🔴 Critical: {review_result.critical_count}")
+            if review_result.high_count > 0:
+                print(f"   🟠 High: {review_result.high_count}")
+            if review_result.medium_count > 0:
+                print(f"   🟡 Medium: {review_result.medium_count}")
+            print()
+            
             # Post comments based on strategy
+            print("💬 Step 4/5: Posting review comments...")
             strategy = review_config.get('comment_strategy', 'both')
+            print(f"   Strategy: {strategy}")
             
             if strategy in ['summary', 'both']:
+                print("   📝 Posting summary comment...")
                 summary_comment = self.comment_service.format_summary_comment(review_result)
                 await adapter.post_summary_comment(pr_data, summary_comment)
+                print("   ✅ Summary comment posted")
             
             if strategy in ['inline', 'both']:
                 inline_comments = self.comment_service.format_inline_comments(review_result)
                 if inline_comments:
+                    print(f"   💭 Posting {len(inline_comments)} inline comment(s)...")
                     await adapter.post_inline_comments(pr_data, inline_comments)
+                    print(f"   ✅ Inline comments posted")
+            print()
             
             # Update status
+            print("📊 Step 5/5: Updating PR status...")
             if review_result.block_merge:
-                await adapter.update_status(pr_data, "failure", "Critical issues found")
+                status_msg = "Critical issues found - merge blocked"
+                print(f"   ❌ Status: FAILURE")
+                print(f"   Message: {status_msg}")
+                await adapter.update_status(pr_data, "failure", status_msg)
             elif review_result.score >= 8:
-                await adapter.update_status(pr_data, "success", f"Code quality: {review_result.score}/10")
+                status_msg = f"Code quality: {review_result.score}/10"
+                print(f"   ✅ Status: SUCCESS")
+                print(f"   Message: {status_msg}")
+                await adapter.update_status(pr_data, "success", status_msg)
             else:
-                await adapter.update_status(pr_data, "success", f"Review complete: {review_result.score}/10")
+                status_msg = f"Review complete: {review_result.score}/10"
+                print(f"   ✅ Status: SUCCESS")
+                print(f"   Message: {status_msg}")
+                await adapter.update_status(pr_data, "success", status_msg)
+            print()
             
             logger.info(
                 "review_completed",
@@ -165,6 +226,13 @@ class CodeReviewServer:
                 score=review_result.score,
                 issues=review_result.total_issues
             )
+            
+            print("🎉 REVIEW COMPLETED SUCCESSFULLY")
+            print(f"   PR: #{pr_data.pr_id}")
+            print(f"   Score: {review_result.score}/10")
+            print(f"   Issues: {review_result.total_issues}")
+            print(f"   Status: {'BLOCKED' if review_result.block_merge else 'APPROVED' if review_result.score >= 8 else 'REVIEW NEEDED'}")
+            print("="*80 + "\n")
             
             return {
                 "status": "success",
@@ -176,6 +244,9 @@ class CodeReviewServer:
             }
             
         except Exception as e:
+            print(f"❌ ERROR during review process:")
+            print(f"   {str(e)}")
+            print("="*80 + "\n")
             logger.exception("webhook_processing_failed", error=str(e))
             return {"status": "error", "message": str(e)}
 
@@ -187,8 +258,23 @@ review_server = CodeReviewServer()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
+    print("\n" + "="*80)
+    print("🚀 MCP CODE REVIEW SERVER STARTING")
+    print("="*80)
+    print(f"📊 Version: 1.0.0")
+    print(f"🤖 AI Provider: {config['ai']['provider'].upper()}")
+    print(f"🧠 Model: {config['ai']['model']}")
+    print(f"🔌 Platforms: {', '.join([p.value for p in review_server.adapters.keys()])}")
+    print(f"💬 Comment Strategy: {config['review']['comment_strategy']}")
+    print(f"🔍 Focus Areas: {', '.join(config['review']['focus'])}")
+    print("="*80)
+    print("✅ Server ready to receive webhooks!")
+    print("="*80 + "\n")
     logger.info("server_starting")
     yield
+    print("\n" + "="*80)
+    print("🛑 SERVER SHUTTING DOWN")
+    print("="*80 + "\n")
     logger.info("server_shutting_down")
 
 app = FastAPI(
@@ -219,6 +305,11 @@ async def webhook_endpoint(request: Request):
         result = await review_server.process_webhook(request)
         return JSONResponse(content=result)
     except Exception as e:
+        print("\n" + "="*80)
+        print("❌ WEBHOOK ERROR")
+        print("="*80)
+        print(f"Error: {str(e)}")
+        print("="*80 + "\n")
         logger.exception("webhook_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
