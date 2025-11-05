@@ -45,7 +45,7 @@ platforms:
 # Review Configuration
 review:
   # Comment strategies: inline, summary, both
-  comment_strategy: "both"
+  comment_strategy: "summary"  # Sadece genel yorum
   
   # Severity levels to report
   report_levels:

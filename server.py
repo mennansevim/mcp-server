@@ -192,7 +192,7 @@ async def lifespan(app: FastAPI):
     logger.info("server_shutting_down")
 
 app = FastAPI(
-    title="MCP Code Review Server",
+    title="MCP Code Review Server By Mennano",
     description="AI-powered code review with platform integration",
     version="1.0.0",
     lifespan=lifespan
@@ -203,7 +203,7 @@ app = FastAPI(
 async def root():
     """Health check"""
     return {
-        "name": "MCP Code Review Server",
+        "name": "MCP Code Review Server By Mennano",
         "version": "1.0.0",
         "status": "healthy",
         "platforms": list(review_server.adapters.keys())
