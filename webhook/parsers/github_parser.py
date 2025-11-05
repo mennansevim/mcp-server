@@ -10,7 +10,9 @@ class GitHubParser:
     
     def is_pull_request_event(self, headers: Dict[str, str], body: Dict[str, Any]) -> bool:
         """Check if this is a PR event"""
-        event_type = headers.get('x-github-event', '')
+        # Case-insensitive header lookup
+        headers_lower = {k.lower(): v for k, v in headers.items()}
+        event_type = headers_lower.get('x-github-event', '')
         return event_type == 'pull_request' and body.get('action') in ['opened', 'synchronize', 'reopened']
     
     def parse(self, headers: Dict[str, str], body: Dict[str, Any]) -> UnifiedPRData:

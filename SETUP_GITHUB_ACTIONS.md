@@ -250,3 +250,4 @@ Kurulum tamamlandı mı?
 
 **Artık her PR otomatik olarak AI review alacak! 🤖✨**
 
+
