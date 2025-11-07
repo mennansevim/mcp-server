@@ -47,6 +47,14 @@ review:
   # Comment strategies: inline, summary, both
   comment_strategy: "summary"  # Sadece genel yorum
   
+  # Detailed analysis table for specific branches
+  # When PR targets these branches, a detailed severity x type table will be added
+  detailed_analysis_branches:
+    - master
+    - main
+    - preprod
+    - production
+  
   # Severity levels to report
   report_levels:
     - critical

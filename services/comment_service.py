@@ -2,7 +2,7 @@
 Service for formatting and posting review comments
 """
 import structlog
-from typing import List
+from typing import List, Dict
 from models import ReviewResult, ReviewIssue, IssueSeverity
 
 logger = structlog.get_logger()
@@ -19,13 +19,73 @@ class CommentService:
         IssueSeverity.INFO: "ℹ️",
     }
     
+    # Issue category to type mapping
+    CATEGORY_TYPE_MAP = {
+        'security': 'Security',
+        'bugs': 'Reliability',
+        'bug': 'Reliability',
+        'performance': 'Reliability',
+        'reliability': 'Reliability',
+        'code_quality': 'Maintainability',
+        'best_practices': 'Maintainability',
+        'maintainability': 'Maintainability',
+        'style': 'Maintainability',
+        'compilation': 'Reliability',
+        'general': 'Maintainability'
+    }
+    
     @staticmethod
-    def format_summary_comment(result: ReviewResult) -> str:
+    def _generate_severity_type_table(result: ReviewResult) -> str:
+        """
+        Generate detailed severity x type table
+        
+        Args:
+            result: ReviewResult
+            
+        Returns:
+            Markdown table string
+        """
+        # Initialize counters
+        matrix = {
+            'Security': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
+            'Maintainability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
+            'Reliability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0}
+        }
+        
+        # Count issues by severity and type
+        for issue in result.issues:
+            if issue.severity not in [IssueSeverity.CRITICAL, IssueSeverity.HIGH, IssueSeverity.MEDIUM]:
+                continue
+                
+            issue_type = CommentService.CATEGORY_TYPE_MAP.get(
+                issue.category.lower(), 
+                'Maintainability'
+            )
+            severity_upper = issue.severity.value.upper()
+            
+            if severity_upper in matrix[issue_type]:
+                matrix[issue_type][severity_upper] += 1
+        
+        # Build table
+        lines = [
+            "### 📊 Detaylı Analiz Özeti",
+            "",
+            "| Scope | 🔴 Critical<br/>Security | 🔴 Critical<br/>Maintainability | 🔴 Critical<br/>Reliability | 🟠 Major<br/>Security | 🟠 Major<br/>Maintainability | 🟠 Major<br/>Reliability | 🟡 Minor<br/>Security | 🟡 Minor<br/>Maintainability | 🟡 Minor<br/>Reliability |",
+            "|:------|:----------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|",
+            f"| **Overall** | {matrix['Security']['CRITICAL']} | {matrix['Maintainability']['CRITICAL']} | {matrix['Reliability']['CRITICAL']} | {matrix['Security']['HIGH']} | {matrix['Maintainability']['HIGH']} | {matrix['Reliability']['HIGH']} | {matrix['Security']['MEDIUM']} | {matrix['Maintainability']['MEDIUM']} | {matrix['Reliability']['MEDIUM']} |",
+            ""
+        ]
+        
+        return "\n".join(lines)
+    
+    @staticmethod
+    def format_summary_comment(result: ReviewResult, show_detailed_table: bool = False) -> str:
         """
         Format review result as a summary comment
         
         Args:
             result: ReviewResult to format
+            show_detailed_table: Whether to show detailed severity x type table
             
         Returns:
             Markdown formatted comment
@@ -37,6 +97,10 @@ class CommentService:
             f"**Score:** {result.score}/10 {'✅' if result.score >= 8 else '⚠️' if result.score >= 6 else '❌'}",
             "",
         ]
+        
+        # Add detailed table if requested
+        if show_detailed_table:
+            lines.append(CommentService._generate_severity_type_table(result))
         
         # Summary
         lines.extend([

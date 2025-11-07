@@ -187,9 +187,19 @@ class CodeReviewServer:
             strategy = review_config.get('comment_strategy', 'both')
             print(f"   Strategy: {strategy}")
             
+            # Check if detailed table should be shown for this branch
+            detailed_branches = review_config.get('detailed_analysis_branches', [])
+            show_detailed_table = pr_data.target_branch in detailed_branches
+            
+            if show_detailed_table:
+                print(f"   📊 Detailed analysis table enabled for target branch: {pr_data.target_branch}")
+            
             if strategy in ['summary', 'both']:
                 print("   📝 Posting summary comment...")
-                summary_comment = self.comment_service.format_summary_comment(review_result)
+                summary_comment = self.comment_service.format_summary_comment(
+                    review_result, 
+                    show_detailed_table=show_detailed_table
+                )
                 await adapter.post_summary_comment(pr_data, summary_comment)
                 print("   ✅ Summary comment posted")
             

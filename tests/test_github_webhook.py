@@ -160,9 +160,25 @@ def main():
         print("   $ python test_github_webhook.py")
         sys.exit(1)
     
-    # 2. Webhook gönder
+    # Test 1: master branch'e PR (detaylı tablo ile)
     print("\n" + "-"*60)
-    result = send_webhook(base_url, MOCK_PR_PAYLOAD)
+    print("🧪 Test 1: master branch'e PR (Detaylı Tablo Var)")
+    print("-"*60)
+    payload_master = MOCK_PR_PAYLOAD.copy()
+    payload_master["pull_request"]["base"]["ref"] = "master"
+    result1 = send_webhook(base_url, payload_master)
+    
+    # Test 2: develop branch'e PR (detaylı tablo yok)
+    print("\n" + "-"*60)
+    print("🧪 Test 2: develop branch'e PR (Detaylı Tablo Yok)")
+    print("-"*60)
+    payload_develop = MOCK_PR_PAYLOAD.copy()
+    payload_develop["pull_request"]["base"]["ref"] = "develop"
+    payload_develop["number"] = 124
+    payload_develop["pull_request"]["number"] = 124
+    result2 = send_webhook(base_url, payload_develop)
+    
+    result = result1  # Ana sonuç olarak ilkini kullan
     
     if result:
         print("\n" + "="*60)
