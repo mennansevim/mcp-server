@@ -37,7 +37,7 @@ class CommentService:
     @staticmethod
     def _generate_severity_type_table(result: ReviewResult) -> str:
         """
-        Generate detailed severity x type table
+        Generate detailed severity x type table with file-level breakdown
         
         Args:
             result: ReviewResult
@@ -45,36 +45,68 @@ class CommentService:
         Returns:
             Markdown table string
         """
-        # Initialize counters
-        matrix = {
+        # Initialize overall counters
+        overall = {
             'Security': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
             'Maintainability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
             'Reliability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0}
         }
         
+        # Initialize file-level counters
+        files = {}
+        
         # Count issues by severity and type
         for issue in result.issues:
             if issue.severity not in [IssueSeverity.CRITICAL, IssueSeverity.HIGH, IssueSeverity.MEDIUM]:
                 continue
-                
+            
             issue_type = CommentService.CATEGORY_TYPE_MAP.get(
                 issue.category.lower(), 
                 'Maintainability'
             )
             severity_upper = issue.severity.value.upper()
             
-            if severity_upper in matrix[issue_type]:
-                matrix[issue_type][severity_upper] += 1
+            # Update overall counts
+            if severity_upper in overall[issue_type]:
+                overall[issue_type][severity_upper] += 1
+            
+            # Update file-level counts
+            if issue.file_path:
+                if issue.file_path not in files:
+                    files[issue.file_path] = {
+                        'Security': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
+                        'Maintainability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
+                        'Reliability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0}
+                    }
+                files[issue.file_path][issue_type][severity_upper] += 1
         
-        # Build table
+        # Build table header
         lines = [
-            "### 📊 Detaylı Analiz Özeti",
+            "### 📊 Detaylı Analiz Özeti (Severity × Type)",
             "",
-            "| Scope | 🔴 Critical<br/>Security | 🔴 Critical<br/>Maintainability | 🔴 Critical<br/>Reliability | 🟠 Major<br/>Security | 🟠 Major<br/>Maintainability | 🟠 Major<br/>Reliability | 🟡 Minor<br/>Security | 🟡 Minor<br/>Maintainability | 🟡 Minor<br/>Reliability |",
-            "|:------|:----------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|",
-            f"| **Overall** | {matrix['Security']['CRITICAL']} | {matrix['Maintainability']['CRITICAL']} | {matrix['Reliability']['CRITICAL']} | {matrix['Security']['HIGH']} | {matrix['Maintainability']['HIGH']} | {matrix['Reliability']['HIGH']} | {matrix['Security']['MEDIUM']} | {matrix['Maintainability']['MEDIUM']} | {matrix['Reliability']['MEDIUM']} |",
-            ""
+            "| Scope / File Path | 🔴 Critical<br/>Security | 🔴 Critical<br/>Maintainability | 🔴 Critical<br/>Reliability | 🟠 Major<br/>Security | 🟠 Major<br/>Maintainability | 🟠 Major<br/>Reliability | 🟡 Minor<br/>Security | 🟡 Minor<br/>Maintainability | 🟡 Minor<br/>Reliability |",
+            "|:------------------|:----------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|",
         ]
+        
+        # Add overall row
+        overall_row = f"| **Overall** | {overall['Security']['CRITICAL']} | {overall['Maintainability']['CRITICAL']} | {overall['Reliability']['CRITICAL']} | {overall['Security']['HIGH']} | {overall['Maintainability']['HIGH']} | {overall['Reliability']['HIGH']} | {overall['Security']['MEDIUM']} | {overall['Maintainability']['MEDIUM']} | {overall['Reliability']['MEDIUM']} |"
+        lines.append(overall_row)
+        
+        # Add file rows (sorted by total issues descending)
+        sorted_files = sorted(
+            files.items(),
+            key=lambda x: sum(sum(severity.values()) for severity in x[1].values()),
+            reverse=True
+        )
+        
+        for file_path, matrix in sorted_files[:10]:  # Limit to top 10 files
+            file_row = f"| `{file_path}` | {matrix['Security']['CRITICAL']} | {matrix['Maintainability']['CRITICAL']} | {matrix['Reliability']['CRITICAL']} | {matrix['Security']['HIGH']} | {matrix['Maintainability']['HIGH']} | {matrix['Reliability']['HIGH']} | {matrix['Security']['MEDIUM']} | {matrix['Maintainability']['MEDIUM']} | {matrix['Reliability']['MEDIUM']} |"
+            lines.append(file_row)
+        
+        if len(files) > 10:
+            lines.append(f"| *... ve {len(files) - 10} dosya daha* | - | - | - | - | - | - | - | - | - |")
+        
+        lines.append("")
         
         return "\n".join(lines)
     
