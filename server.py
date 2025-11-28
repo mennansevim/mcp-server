@@ -5,7 +5,6 @@ Platform-agnostic AI-powered code review via webhooks and MCP tools
 import os
 import yaml
 import structlog
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse

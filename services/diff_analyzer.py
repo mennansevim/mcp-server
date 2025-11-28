@@ -84,7 +84,8 @@ class DiffAnalyzer:
         try:
             patch_set = PatchSet(diff_text)
             return [f.path for f in patch_set]
-        except:
+        except Exception as e:
+            logger.warning("failed_to_extract_changed_files", error=str(e))
             return []
     
     @staticmethod

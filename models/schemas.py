@@ -3,7 +3,7 @@ Unified data models for cross-platform code review
 """
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 class Platform(str, Enum):
