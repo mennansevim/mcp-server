@@ -2,7 +2,7 @@
 Base adapter interface for platform integrations
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 from models import UnifiedPRData
 
 
