@@ -417,7 +417,7 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
         return response.choices[0].message.content
     
     def _parse_ai_response(self, response: str) -> dict:
-        """Parse AI response to structured data"""
+        """Parse AI response to structured data with robust error handling"""
         try:
             # Try to find JSON in the response
             start = response.find('{')
@@ -425,21 +425,114 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
             
             if start != -1 and end > start:
                 json_str = response[start:end]
-                return json.loads(json_str)
+                
+                # Clean up common JSON issues
+                # Remove trailing commas before ] or }
+                import re
+                json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                
+                # Try parsing
+                try:
+                    data = json.loads(json_str)
+                except json.JSONDecodeError as e:
+                    # Try more aggressive cleaning
+                    logger.warning("json_parse_retry", error=str(e))
+                    
+                    # Remove any control characters
+                    json_str = ''.join(char for char in json_str if ord(char) >= 32 or char in '\n\r\t')
+                    
+                    # Try again
+                    try:
+                        data = json.loads(json_str)
+                    except json.JSONDecodeError:
+                        # Final fallback: extract what we can
+                        logger.warning("json_parse_failed_extracting_manually")
+                        return self._extract_review_manually(response)
+                
+                # Validate and fix the parsed data
+                return self._validate_review_data(data, response)
             else:
-                # Fallback: return basic structure
-                return {
-                    "summary": response[:500],
-                    "score": 7,
-                    "issues": [],
-                    "approval_recommended": True
+                # No JSON found, extract manually
+                return self._extract_review_manually(response)
+                
+        except Exception as e:
+            logger.exception("parse_ai_response_failed", error=str(e))
+            return self._extract_review_manually(response)
+    
+    def _validate_review_data(self, data: dict, original_response: str) -> dict:
+        """Validate and fix review data structure"""
+        # Ensure required fields exist
+        if "summary" not in data or not data["summary"]:
+            data["summary"] = original_response[:500] if original_response else "Review completed"
+        
+        if "score" not in data:
+            data["score"] = 7
+        else:
+            # Ensure score is a valid number
+            try:
+                data["score"] = max(0, min(10, int(data["score"])))
+            except (ValueError, TypeError):
+                data["score"] = 5
+        
+        if "issues" not in data or not isinstance(data["issues"], list):
+            data["issues"] = []
+        
+        # Validate each issue
+        valid_issues = []
+        for issue in data["issues"]:
+            if isinstance(issue, dict):
+                # Ensure required fields
+                validated = {
+                    "severity": str(issue.get("severity", "info")).lower(),
+                    "title": str(issue.get("title", "Issue found")),
+                    "description": str(issue.get("description", "")),
+                    "category": str(issue.get("category", "general")),
+                    "file_path": issue.get("file_path"),
+                    "line_number": issue.get("line_number"),
+                    "suggestion": issue.get("suggestion"),
+                    "code_snippet": issue.get("code_snippet"),
                 }
-        except json.JSONDecodeError:
-            logger.warning("failed_to_parse_ai_response")
-            return {
-                "summary": "Failed to parse AI response",
-                "score": 5,
-                "issues": [],
-                "approval_recommended": False
-            }
+                
+                # Validate severity
+                valid_severities = ["critical", "high", "medium", "low", "info"]
+                if validated["severity"] not in valid_severities:
+                    validated["severity"] = "info"
+                
+                valid_issues.append(validated)
+        
+        data["issues"] = valid_issues
+        
+        if "approval_recommended" not in data:
+            data["approval_recommended"] = data["score"] >= 7
+        
+        if "block_merge" not in data:
+            data["block_merge"] = any(i["severity"] == "critical" for i in valid_issues)
+        
+        return data
+    
+    def _extract_review_manually(self, response: str) -> dict:
+        """Extract review data from non-JSON response"""
+        logger.info("extracting_review_manually")
+        
+        # Try to find score
+        import re
+        score = 7
+        score_match = re.search(r'score["\s:]+(\d+)', response.lower())
+        if score_match:
+            score = max(0, min(10, int(score_match.group(1))))
+        
+        # Build summary from response
+        summary = response[:1000] if response else "Review completed"
+        
+        # Check for critical keywords
+        has_critical = any(word in response.lower() for word in 
+                         ["critical", "error", "won't compile", "syntax error", "compilation error"])
+        
+        return {
+            "summary": summary,
+            "score": score,
+            "issues": [],
+            "approval_recommended": score >= 7 and not has_critical,
+            "block_merge": has_critical
+        }
 

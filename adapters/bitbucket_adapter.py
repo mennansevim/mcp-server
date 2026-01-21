@@ -1,10 +1,10 @@
 """
-Bitbucket API adapter
+Bitbucket API adapter (Updated for API Tokens)
 """
 import os
 import structlog
+import requests
 from typing import List
-from atlassian.bitbucket import Cloud as BitbucketCloud
 
 from models import UnifiedPRData
 from .base_adapter import BasePlatformAdapter
@@ -13,21 +13,58 @@ logger = structlog.get_logger()
 
 
 class BitbucketAdapter(BasePlatformAdapter):
-    """Bitbucket API client"""
+    """Bitbucket API client - supports multiple auth methods"""
     
     def __init__(self):
-        username = os.getenv("BITBUCKET_USERNAME")
-        password = os.getenv("BITBUCKET_APP_PASSWORD")
+        # Auth method priority:
+        # 1. Repository Access Token (BITBUCKET_REPO_TOKEN) - works with 2FA
+        # 2. User API Token (BITBUCKET_API_TOKEN) - may have 2FA issues
+        # 3. App Password (BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD) - legacy
         
-        if not username or not password:
-            raise ValueError("BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD required")
+        self.repo_token = os.getenv("BITBUCKET_REPO_TOKEN")
+        self.api_token = os.getenv("BITBUCKET_API_TOKEN")
+        self.username = os.getenv("BITBUCKET_USERNAME")
+        self.app_password = os.getenv("BITBUCKET_APP_PASSWORD")
         
-        self.client = BitbucketCloud(
-            username=username,
-            password=password,
-            cloud=True
-        )
-        logger.info("bitbucket_adapter_initialized")
+        # Determine auth type
+        if self.repo_token:
+            self.auth_type = "repo_token"
+        elif self.api_token:
+            self.auth_type = "api_token"
+        elif self.username and self.app_password:
+            self.auth_type = "basic"
+        else:
+            raise ValueError(
+                "Bitbucket auth required: BITBUCKET_REPO_TOKEN, BITBUCKET_API_TOKEN, "
+                "or (BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD)"
+            )
+        
+        self.api_base = "https://api.bitbucket.org/2.0"
+        logger.info("bitbucket_adapter_initialized", auth_type=self.auth_type)
+    
+    def _get_headers(self) -> dict:
+        """Get authentication headers"""
+        if self.auth_type == "repo_token":
+            # Repository Access Token uses Bearer auth
+            return {
+                "Authorization": f"Bearer {self.repo_token}",
+                "Accept": "application/json"
+            }
+        elif self.auth_type == "api_token":
+            return {
+                "Authorization": f"Bearer {self.api_token}",
+                "Accept": "application/json"
+            }
+        else:
+            # basic auth uses requests.auth
+            return {"Accept": "application/json"}
+    
+    def _get_auth(self):
+        """Get authentication for requests"""
+        if self.auth_type == "basic":
+            from requests.auth import HTTPBasicAuth
+            return HTTPBasicAuth(self.username, self.app_password)
+        return None  # repo_token and api_token use headers
     
     async def fetch_diff(self, pr_data: UnifiedPRData) -> str:
         """Fetch PR diff from Bitbucket"""
@@ -36,12 +73,18 @@ class BitbucketAdapter(BasePlatformAdapter):
             repo_slug = pr_data.repo_full_name.split('/')[-1]
             pr_id = pr_data.pr_id
             
-            # Get diff
-            diff = self.client.workspaces.get(workspace).repositories.get(
-                repo_slug
-            ).pullrequests.get(pr_id).diff()
+            # Construct API URL
+            url = f"{self.api_base}/repositories/{workspace}/{repo_slug}/pullrequests/{pr_id}/diff"
             
-            return diff
+            # Make request
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                auth=self._get_auth()
+            )
+            response.raise_for_status()
+            
+            return response.text
             
         except Exception as e:
             logger.exception("bitbucket_fetch_diff_failed", error=str(e))
@@ -54,9 +97,17 @@ class BitbucketAdapter(BasePlatformAdapter):
             repo_slug = pr_data.repo_full_name.split('/')[-1]
             pr_id = pr_data.pr_id
             
-            self.client.workspaces.get(workspace).repositories.get(
-                repo_slug
-            ).pullrequests.get(pr_id).comment(comment)
+            # Construct API URL
+            url = f"{self.api_base}/repositories/{workspace}/{repo_slug}/pullrequests/{pr_id}/comments"
+            
+            # Make request
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                auth=self._get_auth(),
+                json={"content": {"raw": comment}}
+            )
+            response.raise_for_status()
             
             logger.info("bitbucket_comment_posted", pr_id=pr_data.pr_id)
             return True
@@ -76,19 +127,25 @@ class BitbucketAdapter(BasePlatformAdapter):
             repo_slug = pr_data.repo_full_name.split('/')[-1]
             pr_id = pr_data.pr_id
             
-            pr = self.client.workspaces.get(workspace).repositories.get(
-                repo_slug
-            ).pullrequests.get(pr_id)
+            url = f"{self.api_base}/repositories/{workspace}/{repo_slug}/pullrequests/{pr_id}/comments"
             
             for comment_data in comments:
                 # Bitbucket inline comments require specific structure
-                pr.comment(
-                    content=comment_data['body'],
-                    inline={
-                        'path': comment_data['file_path'],
-                        'to': comment_data['line']
+                payload = {
+                    "content": {"raw": comment_data['body']},
+                    "inline": {
+                        "path": comment_data['file_path'],
+                        "to": comment_data['line']
                     }
+                }
+                
+                response = requests.post(
+                    url,
+                    headers=self._get_headers(),
+                    auth=self._get_auth(),
+                    json=payload
                 )
+                response.raise_for_status()
             
             logger.info("bitbucket_inline_comments_posted", count=len(comments))
             return True
@@ -119,14 +176,22 @@ class BitbucketAdapter(BasePlatformAdapter):
                 'pending': 'INPROGRESS'
             }.get(state, 'INPROGRESS')
             
-            self.client.workspaces.get(workspace).repositories.get(
-                repo_slug
-            ).commit(sha).statuses.post(
-                key='ai-code-review',
-                state=bitbucket_state,
-                description=description,
-                name='AI Code Review'
+            url = f"{self.api_base}/repositories/{workspace}/{repo_slug}/commit/{sha}/statuses/build"
+            
+            payload = {
+                "key": "ai-code-review",
+                "state": bitbucket_state,
+                "description": description,
+                "name": "AI Code Review"
+            }
+            
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                auth=self._get_auth(),
+                json=payload
             )
+            response.raise_for_status()
             
             logger.info("bitbucket_status_updated", state=bitbucket_state)
             return True

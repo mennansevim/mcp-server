@@ -46,7 +46,22 @@ class WebhookHandler:
             UnifiedPRData or None if not a PR event
         """
         headers = dict(request.headers)
-        body = await request.json()
+        
+        # Debug: Get raw body and parse JSON manually
+        raw_body = await request.body()
+        raw_text = raw_body.decode('utf-8')
+        logger.info("raw_webhook_received", 
+                    content_type=headers.get('content-type'),
+                    body_preview=raw_text[:300])
+        
+        try:
+            import json
+            body = json.loads(raw_text)
+        except Exception as e:
+            logger.error("json_parse_failed", 
+                        error=str(e), 
+                        raw_body=raw_text[:500])
+            raise
         
         # Detect platform
         platform = self._detect_platform(headers, body)

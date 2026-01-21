@@ -1,0 +1,95 @@
+# Bitbucket Pipelines - AI Code Review (Final Working Version)
+# Repository: https://bitbucket.org/commencers/playground
+
+image: atlassian/default-image:3
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: AI Code Review
+          script:
+            - echo "🤖 AI Code Review baslatiliyor..."
+            
+            # Check if PR variables are available
+            - |
+              if [ -z "$BITBUCKET_PR_ID" ]; then
+                echo "❌ HATA: BITBUCKET_PR_ID bos! Bu bir PR degil."
+                echo "Bu pipeline sadece Pull Request'lerde calisir."
+                exit 0
+              fi
+            
+            - echo "✅ PR ID: $BITBUCKET_PR_ID"
+            - echo "✅ Source: $BITBUCKET_BRANCH"
+            - echo "✅ Target: $BITBUCKET_PR_DESTINATION_BRANCH"
+            
+            # Create JSON payload with actual values
+            - |
+              cat > /tmp/payload.json << JSONEOF
+              {
+                "pullrequest": {
+                  "id": $BITBUCKET_PR_ID,
+                  "title": "PR #$BITBUCKET_PR_ID",
+                  "description": "",
+                  "links": {
+                    "html": {
+                      "href": "https://bitbucket.org/commencers/playground/pull-requests/$BITBUCKET_PR_ID"
+                    }
+                  },
+                  "source": {
+                    "branch": {
+                      "name": "$BITBUCKET_BRANCH"
+                    }
+                  },
+                  "destination": {
+                    "branch": {
+                      "name": "$BITBUCKET_PR_DESTINATION_BRANCH"
+                    }
+                  },
+                  "author": {
+                    "username": "bitbucket-user"
+                  }
+                },
+                "repository": {
+                  "full_name": "commencers/playground",
+                  "uuid": "$BITBUCKET_REPO_UUID",
+                  "workspace": {
+                    "slug": "commencers"
+                  }
+                }
+              }
+              JSONEOF
+            
+            # Validate JSON
+            - |
+              if ! cat /tmp/payload.json | python3 -m json.tool > /dev/null 2>&1; then
+                echo "❌ HATA: JSON gecersiz!"
+                echo "Payload:"
+                cat /tmp/payload.json
+                exit 1
+              fi
+            
+            - echo "✅ JSON payload hazir"
+            - echo "Payload:"
+            - cat /tmp/payload.json | python3 -m json.tool
+            
+            # Send webhook request
+            - |
+              HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+                -X POST "$REVIEW_SERVER_URL/webhook" \
+                -H "Content-Type: application/json" \
+                -H "X-Event-Key: pullrequest:created" \
+                --data-binary @/tmp/payload.json)
+              
+              echo "HTTP Status: $HTTP_CODE"
+              echo "Response:"
+              cat /tmp/response.txt
+              
+              if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+                echo "✅ AI Code Review basariyla tamamlandi!"
+                exit 0
+              else
+                echo "⚠️  AI Code Review hatasi (HTTP: $HTTP_CODE)"
+                exit 1
+              fi
+

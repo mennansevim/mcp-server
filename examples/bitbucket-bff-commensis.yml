@@ -1,0 +1,81 @@
+# Bitbucket Pipelines - AI Code Review
+# Repository: https://bitbucket.org/uygulamagelistirme1/bff_commensis
+# 
+# Bu dosyayı bff_commensis repo'sunun root'una "bitbucket-pipelines.yml" olarak kopyala
+# 
+# Gerekli Repository Variables (Bitbucket → Repository settings → Pipelines → Repository variables):
+#   - REVIEW_SERVER_URL: https://your-ngrok-url.ngrok-free.dev (veya production URL)
+
+image: atlassian/default-image:3
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: AI Code Review
+          script:
+            - echo "AI Code Review baslatiliyor..."
+            - echo "PR #$BITBUCKET_PR_ID - $BITBUCKET_BRANCH -> $BITBUCKET_PR_DESTINATION_BRANCH"
+            
+            # Install jq for safe JSON handling
+            - apt-get update && apt-get install -y jq > /dev/null 2>&1 || true
+            
+            # Build JSON payload safely
+            - |
+              PAYLOAD=$(jq -n \
+                --arg pr_id "$BITBUCKET_PR_ID" \
+                --arg title "$BITBUCKET_PR_TITLE" \
+                --arg branch "$BITBUCKET_BRANCH" \
+                --arg dest_branch "$BITBUCKET_PR_DESTINATION_BRANCH" \
+                --arg repo_uuid "$BITBUCKET_REPO_UUID" \
+                '{
+                  "pullrequest": {
+                    "id": ($pr_id | tonumber),
+                    "title": $title,
+                    "description": "",
+                    "links": {
+                      "html": {
+                        "href": ("https://bitbucket.org/uygulamagelistirme1/bff_commensis/pull-requests/" + $pr_id)
+                      }
+                    },
+                    "source": {
+                      "branch": {
+                        "name": $branch
+                      }
+                    },
+                    "destination": {
+                      "branch": {
+                        "name": $dest_branch
+                      }
+                    },
+                    "author": {
+                      "username": "mennansevim"
+                    }
+                  },
+                  "repository": {
+                    "full_name": "uygulamagelistirme1/bff_commensis",
+                    "uuid": $repo_uuid,
+                    "workspace": {
+                      "slug": "uygulamagelistirme1"
+                    }
+                  }
+                }')
+            
+            # Call MCP review server
+            - |
+              RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$REVIEW_SERVER_URL/webhook" \
+                -H "Content-Type: application/json" \
+                -H "X-Event-Key: pullrequest:created" \
+                -d "$PAYLOAD")
+              
+              HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+              BODY=$(echo "$RESPONSE" | sed '$d')
+              
+              echo "Response: $BODY"
+              echo "HTTP Status: $HTTP_CODE"
+              
+              if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+                echo "AI Code Review basariyla tamamlandi!"
+              else
+                echo "AI Code Review uyari ile tamamlandi (HTTP: $HTTP_CODE)"
+              fi

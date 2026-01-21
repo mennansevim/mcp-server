@@ -323,6 +323,85 @@ async def webhook_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/ide/review")
+async def ide_review_endpoint(request: Request):
+    """
+    IDE integration endpoint for direct code review
+    Used by Rider, VS Code, IntelliJ plugins
+    """
+    try:
+        body = await request.json()
+        
+        diff = body.get("diff", "")
+        files = body.get("files", [])
+        source = body.get("source", "ide")
+        focus_areas = body.get("focus_areas", config['review'].get('focus', []))
+        
+        if not diff:
+            return JSONResponse(
+                content={"status": "error", "message": "No diff provided"},
+                status_code=400
+            )
+        
+        logger.info("ide_review_request", source=source, files_count=len(files))
+        
+        print("\n" + "="*80)
+        print(f"🖥️  IDE REVIEW REQUEST from {source.upper()}")
+        print("="*80)
+        print(f"📁 Files: {len(files)}")
+        print(f"📝 Diff size: {len(diff)} bytes")
+        print()
+        
+        # Analyze diff
+        files_changed = review_server.diff_analyzer.get_changed_files(diff)
+        if not files_changed:
+            files_changed = files
+        
+        # Run AI review
+        print("🤖 Running AI review...")
+        review_result = await review_server.ai_reviewer.review(
+            diff=diff,
+            files_changed=files_changed,
+            focus_areas=focus_areas
+        )
+        
+        print(f"✅ Review completed - Score: {review_result.score}/10")
+        print(f"📊 Issues: {review_result.total_issues}")
+        print("="*80 + "\n")
+        
+        # Return review result
+        return JSONResponse(content={
+            "status": "success",
+            "summary": review_result.summary,
+            "score": review_result.score,
+            "issues": [
+                {
+                    "severity": issue.severity.value,
+                    "title": issue.title,
+                    "description": issue.description,
+                    "category": issue.category,
+                    "file_path": issue.file_path,
+                    "line_number": issue.line_number,
+                    "suggestion": issue.suggestion,
+                    "code_snippet": issue.code_snippet
+                }
+                for issue in review_result.issues
+            ],
+            "approval_recommended": review_result.approval_recommended,
+            "block_merge": review_result.block_merge,
+            "total_issues": review_result.total_issues,
+            "critical_count": review_result.critical_count,
+            "high_count": review_result.high_count
+        })
+        
+    except Exception as e:
+        logger.exception("ide_review_error", error=str(e))
+        return JSONResponse(
+            content={"status": "error", "message": str(e)},
+            status_code=500
+        )
+
+
 @app.get("/mcp/sse")
 async def mcp_sse_endpoint(request: Request):
     """

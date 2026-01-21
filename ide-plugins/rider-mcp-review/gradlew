@@ -1,0 +1,27 @@
+#!/bin/sh
+
+#
+# Gradle wrapper script for POSIX
+#
+
+APP_NAME="Gradle"
+APP_BASE_NAME=$(basename "$0")
+CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
+
+# Determine the Java command to use
+if [ -n "$JAVA_HOME" ] ; then
+    JAVACMD="$JAVA_HOME/bin/java"
+else
+    JAVACMD="java"
+fi
+
+# Download gradle-wrapper.jar if not exists
+WRAPPER_JAR="$PWD/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$WRAPPER_JAR" ]; then
+    echo "Downloading Gradle wrapper..."
+    mkdir -p "$(dirname "$WRAPPER_JAR")"
+    curl -sL -o "$WRAPPER_JAR" "https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar"
+fi
+
+exec "$JAVACMD" -classpath "$WRAPPER_JAR" org.gradle.wrapper.GradleWrapperMain "$@"
+

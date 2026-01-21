@@ -37,184 +37,156 @@ class CommentService:
     @staticmethod
     def _generate_severity_type_table(result: ReviewResult) -> str:
         """
-        Generate detailed severity x type table with file-level breakdown
+        Generate a simple issue summary table
         
         Args:
             result: ReviewResult
             
         Returns:
-            Markdown table string
+            Markdown formatted summary
         """
-        # Initialize overall counters
-        overall = {
-            'Security': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
-            'Maintainability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
-            'Reliability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0}
+        if not result.issues:
+            return ""
+        
+        # Count by severity
+        severity_counts = {
+            'critical': 0,
+            'high': 0, 
+            'medium': 0,
+            'low': 0,
+            'info': 0
         }
         
-        # Initialize file-level counters
-        files = {}
+        # Count by category
+        category_counts = {}
         
-        # Count issues by severity and type
         for issue in result.issues:
-            if issue.severity not in [IssueSeverity.CRITICAL, IssueSeverity.HIGH, IssueSeverity.MEDIUM]:
-                continue
+            sev = issue.severity.value.lower()
+            if sev in severity_counts:
+                severity_counts[sev] += 1
             
-            issue_type = CommentService.CATEGORY_TYPE_MAP.get(
-                issue.category.lower(), 
-                'Maintainability'
-            )
-            severity_upper = issue.severity.value.upper()
+            cat = issue.category.lower()
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        
+        lines = []
+        
+        # Severity summary
+        if any(severity_counts.values()):
+            lines.append("### 📊 Issue Summary")
+            lines.append("")
+            lines.append("| Severity | Count |")
+            lines.append("|:---------|------:|")
             
-            # Update overall counts
-            if severity_upper in overall[issue_type]:
-                overall[issue_type][severity_upper] += 1
+            if severity_counts['critical'] > 0:
+                lines.append(f"| 🔴 Critical | {severity_counts['critical']} |")
+            if severity_counts['high'] > 0:
+                lines.append(f"| 🟠 High | {severity_counts['high']} |")
+            if severity_counts['medium'] > 0:
+                lines.append(f"| 🟡 Medium | {severity_counts['medium']} |")
+            if severity_counts['low'] > 0:
+                lines.append(f"| 🔵 Low | {severity_counts['low']} |")
+            if severity_counts['info'] > 0:
+                lines.append(f"| ℹ️ Info | {severity_counts['info']} |")
             
-            # Update file-level counts
-            if issue.file_path:
-                if issue.file_path not in files:
-                    files[issue.file_path] = {
-                        'Security': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
-                        'Maintainability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0},
-                        'Reliability': {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0}
-                    }
-                files[issue.file_path][issue_type][severity_upper] += 1
+            lines.append("")
         
-        # Build table header
-        lines = [
-            "### 📊 Detaylı Analiz Özeti (Severity × Type)",
-            "",
-            "| Scope / File Path | 🔴 Critical<br/>Security | 🔴 Critical<br/>Maintainability | 🔴 Critical<br/>Reliability | 🟠 Major<br/>Security | 🟠 Major<br/>Maintainability | 🟠 Major<br/>Reliability | 🟡 Minor<br/>Security | 🟡 Minor<br/>Maintainability | 🟡 Minor<br/>Reliability |",
-            "|:------------------|:----------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|:--------:|:---------------:|:-------------:|",
-        ]
-        
-        # Add overall row
-        overall_row = f"| **Overall** | {overall['Security']['CRITICAL']} | {overall['Maintainability']['CRITICAL']} | {overall['Reliability']['CRITICAL']} | {overall['Security']['HIGH']} | {overall['Maintainability']['HIGH']} | {overall['Reliability']['HIGH']} | {overall['Security']['MEDIUM']} | {overall['Maintainability']['MEDIUM']} | {overall['Reliability']['MEDIUM']} |"
-        lines.append(overall_row)
-        
-        # Add file rows (sorted by total issues descending)
-        sorted_files = sorted(
-            files.items(),
-            key=lambda x: sum(sum(severity.values()) for severity in x[1].values()),
-            reverse=True
-        )
-        
-        for file_path, matrix in sorted_files[:10]:  # Limit to top 10 files
-            file_row = f"| `{file_path}` | {matrix['Security']['CRITICAL']} | {matrix['Maintainability']['CRITICAL']} | {matrix['Reliability']['CRITICAL']} | {matrix['Security']['HIGH']} | {matrix['Maintainability']['HIGH']} | {matrix['Reliability']['HIGH']} | {matrix['Security']['MEDIUM']} | {matrix['Maintainability']['MEDIUM']} | {matrix['Reliability']['MEDIUM']} |"
-            lines.append(file_row)
-        
-        if len(files) > 10:
-            lines.append(f"| *... ve {len(files) - 10} dosya daha* | - | - | - | - | - | - | - | - | - |")
-        
-        lines.append("")
+        # Category summary
+        if category_counts:
+            lines.append("### 📂 By Category")
+            lines.append("")
+            lines.append("| Category | Count |")
+            lines.append("|:---------|------:|")
+            
+            for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+                lines.append(f"| {cat.title()} | {count} |")
+            
+            lines.append("")
         
         return "\n".join(lines)
     
     @staticmethod
     def format_summary_comment(result: ReviewResult, show_detailed_table: bool = False) -> str:
         """
-        Format review result as a summary comment
+        Format review result as a simple, readable comment
         
         Args:
             result: ReviewResult to format
-            show_detailed_table: Whether to show detailed severity x type table
+            show_detailed_table: Ignored - kept for compatibility
             
         Returns:
             Markdown formatted comment
         """
-        # Header
-        lines = [
-            "## MCP AI Code Review",
-            "",
-            f"**Score:** {result.score}/10 {'✅' if result.score >= 8 else '⚠️' if result.score >= 6 else '❌'}",
-            "",
-        ]
+        lines = []
         
-        # Add detailed table if requested
-        if show_detailed_table:
-            lines.append(CommentService._generate_severity_type_table(result))
+        # Header with score
+        score_icon = '✅' if result.score >= 8 else '⚠️' if result.score >= 6 else '❌'
+        lines.append(f"## 🤖 MCP AI Code Review - {result.score}/10 {score_icon}")
+        lines.append("")
         
         # Summary
-        lines.extend([
-            "### 📝 Summary",
-            result.summary,
-            "",
-        ])
+        lines.append("### 📝 Summary")
+        lines.append("")
+        lines.append(result.summary.strip())
+        lines.append("")
         
-        # Statistics
+        # Issues count - simple text
         if result.total_issues > 0:
-            lines.extend([
-                "### 📊 Issues Found",
-                f"- Total: **{result.total_issues}**",
-            ])
-            
+            lines.append("---")
+            lines.append("")
+            counts = []
             if result.critical_count > 0:
-                lines.append(f"- {CommentService.SEVERITY_EMOJI[IssueSeverity.CRITICAL]} Critical: **{result.critical_count}**")
+                counts.append(f"🔴 {result.critical_count} Critical")
             if result.high_count > 0:
-                lines.append(f"- {CommentService.SEVERITY_EMOJI[IssueSeverity.HIGH]} High: **{result.high_count}**")
+                counts.append(f"🟠 {result.high_count} High")
             if result.medium_count > 0:
-                lines.append(f"- {CommentService.SEVERITY_EMOJI[IssueSeverity.MEDIUM]} Medium: **{result.medium_count}**")
+                counts.append(f"🟡 {result.medium_count} Medium")
             if result.low_count > 0:
-                lines.append(f"- {CommentService.SEVERITY_EMOJI[IssueSeverity.LOW]} Low: **{result.low_count}**")
-            if result.info_count > 0:
-                lines.append(f"- {CommentService.SEVERITY_EMOJI[IssueSeverity.INFO]} Info: **{result.info_count}**")
+                counts.append(f"🔵 {result.low_count} Low")
             
+            lines.append(f"**Issues:** {result.total_issues} total ({', '.join(counts)})")
             lines.append("")
         
-        # Critical and High issues detail
+        # Critical and High issues - simple list
         critical_high = [i for i in result.issues if i.severity in [IssueSeverity.CRITICAL, IssueSeverity.HIGH]]
         if critical_high:
-            lines.extend([
-                "### ⚠️ Important Issues",
-                "",
-            ])
+            lines.append("---")
+            lines.append("")
+            lines.append("### ⚠️ Issues")
+            lines.append("")
             
-            for issue in critical_high[:10]:  # Limit to 10
+            for issue in critical_high[:10]:
                 emoji = CommentService.SEVERITY_EMOJI[issue.severity]
-                lines.extend([
-                    f"#### {emoji} {issue.title}",
-                    f"**Severity:** {issue.severity.value.upper()}  ",
-                    f"**Category:** {issue.category}  ",
-                ])
+                
+                # Simple format
+                lines.append(f"**{emoji} {issue.title}**")
                 
                 if issue.file_path:
                     location = f"`{issue.file_path}`"
                     if issue.line_number:
-                        location += f" (Line {issue.line_number})"
-                    lines.append(f"**Location:** {location}  ")
+                        location += f" line {issue.line_number}"
+                    lines.append(f"📁 {location}")
                 
-                lines.extend([
-                    "",
-                    issue.description,
-                    "",
-                ])
+                lines.append("")
+                lines.append(issue.description)
                 
                 if issue.suggestion:
-                    lines.extend([
-                        "**Suggestion:**",
-                        f"> {issue.suggestion}",
-                        "",
-                    ])
+                    lines.append("")
+                    lines.append(f"💡 *{issue.suggestion}*")
+                
+                lines.append("")
+                lines.append("---")
+                lines.append("")
         
         # Recommendation
-        lines.extend([
-            "### 🎯 Recommendation",
-            "",
-        ])
-        
         if result.block_merge:
-            lines.append("❌ **Do not merge** - Critical issues must be fixed first.")
+            lines.append("❌ **Do not merge** - Fix critical issues first.")
         elif result.approval_recommended:
-            lines.append("✅ **Approved** - Code looks good!")
+            lines.append("✅ **Approved**")
         else:
-            lines.append("⚠️ **Review recommended** - Please address the issues above.")
+            lines.append("⚠️ **Review recommended**")
         
-        lines.extend([
-            "",
-            "---",
-            "*Generated by MCP AI Code Review Server*",
-            f"*Review Score: {result.score}/10*"
-        ])
+        lines.append("")
+        lines.append(f"*MCP AI Code Review | Score: {result.score}/10*")
         
         return "\n".join(lines)
     
