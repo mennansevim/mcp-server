@@ -1,0 +1,12 @@
+services:
+  rules-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rules-api
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - RULES_DIR=/app/rules
+    restart: unless-stopped
+

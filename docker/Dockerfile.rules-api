@@ -1,0 +1,21 @@
+# Standalone Rules API image
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install minimal runtime deps (standalone; does not require MCP SDK or git)
+COPY rules_api/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy only what's needed for the Rules API
+COPY rules_api /app/rules_api
+COPY rules /app/rules
+
+ENV PORT=8001
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/')" || exit 1
+
+CMD ["python", "rules_api/server.py"]
+
