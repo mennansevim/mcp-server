@@ -47,11 +47,9 @@ class CodeReviewServer:
         self.webhook_handler = WebhookHandler()
         
         # Initialize AI reviewer
-        ai_config = config['ai']
-        self.ai_reviewer = AIReviewer(
-            provider=ai_config['provider'],
-            model=ai_config.get('model')
-        )
+        ai_config = config["ai"]
+        # Provider-agnostic / multi-provider aware
+        self.ai_reviewer = AIReviewer(ai_config=ai_config)
         
         self.diff_analyzer = DiffAnalyzer()
         self.comment_service = CommentService()
@@ -159,8 +157,19 @@ class CodeReviewServer:
             # Perform AI review
             print("🤖 Step 3/5: Starting AI code review...")
             review_config = self.config['review']
-            print(f"   Provider: {self.config['ai']['provider'].upper()}")
-            print(f"   Model: {self.config['ai']['model']}")
+            ai_cfg = self.config.get("ai", {})
+            if isinstance(ai_cfg.get("providers"), list) and ai_cfg["providers"]:
+                primary = ai_cfg.get("primary") or ai_cfg["providers"][0].get("name")
+                model = None
+                for p in ai_cfg["providers"]:
+                    if (p.get("name") or "").lower() == (primary or "").lower():
+                        model = p.get("model")
+                        break
+                print(f"   Provider: {str(primary).upper() if primary else 'UNKNOWN'}")
+                print(f"   Model: {model}")
+            else:
+                print(f"   Provider: {ai_cfg.get('provider', 'groq').upper()}")
+                print(f"   Model: {ai_cfg.get('model')}")
             print(f"   Focus areas: {', '.join(review_config.get('focus', []))}")
             print()
             
@@ -247,6 +256,8 @@ class CodeReviewServer:
                 "status": "success",
                 "pr_id": pr_data.pr_id,
                 "platform": pr_data.platform.value,
+                "ai_provider": self.ai_reviewer.last_provider_used,
+                "ai_model": self.ai_reviewer.last_model_used,
                 "score": review_result.score,
                 "issues": review_result.total_issues,
                 "critical": review_result.critical_count
@@ -271,8 +282,16 @@ async def lifespan(app: FastAPI):
     print("🚀 MCP CODE REVIEW SERVER STARTING")
     print("="*80)
     print(f"📊 Version: 1.0.0")
-    print(f"🤖 AI Provider: {config['ai']['provider'].upper()}")
-    print(f"🧠 Model: {config['ai']['model']}")
+    # Backward compatible display (legacy keys) + new multi-provider config
+    ai_cfg = config.get("ai", {})
+    if isinstance(ai_cfg.get("providers"), list) and ai_cfg["providers"]:
+        providers = [p.get("name") for p in ai_cfg["providers"] if isinstance(p, dict)]
+        print(f"🤖 AI Providers: {', '.join([str(p).upper() for p in providers if p])}")
+        primary = ai_cfg.get("primary") or (providers[0] if providers else None)
+        print(f"⭐ Primary: {str(primary).upper() if primary else 'UNKNOWN'}")
+    else:
+        print(f"🤖 AI Provider: {ai_cfg.get('provider', 'groq').upper()}")
+        print(f"🧠 Model: {ai_cfg.get('model')}")
     print(f"🔌 Platforms: {', '.join([p.value for p in review_server.adapters.keys()])}")
     print(f"💬 Comment Strategy: {config['review']['comment_strategy']}")
     print(f"🔍 Focus Areas: {', '.join(config['review']['focus'])}")

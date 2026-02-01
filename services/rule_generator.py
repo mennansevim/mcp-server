@@ -1,14 +1,12 @@
 """
-Rule dosyalarını dile göre revize eden servis
-AI kullanarak dile özel rule dosyaları oluşturur/günceller
+Rule dosyalarını dile göre revize eden servis.
+
+Provider-agnostic AI routing is implemented via services/ai_providers/*.
 """
-import os
 import structlog
 from pathlib import Path
 from typing import Optional, Dict, List
-from anthropic import Anthropic
-from openai import OpenAI
-from groq import Groq
+from services.ai_providers import AIProviderRouter
 
 logger = structlog.get_logger()
 
@@ -53,23 +51,30 @@ Her kategori için şunları içermeli:
 
 Sadece markdown içeriğini döndür, başka açıklama ekleme."""
 
-    def __init__(self, provider: str = "anthropic", model: Optional[str] = None):
-        self.provider = provider.lower()
-        self.model = model
-        
-        if self.provider == "anthropic":
-            self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            self.model = model or "claude-3-5-sonnet-20241022"
-        elif self.provider == "openai":
-            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self.model = model or "gpt-4-turbo-preview"
-        elif self.provider == "groq":
-            self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-            self.model = model or "llama-3.3-70b-versatile"
-        else:
-            raise ValueError(f"Unsupported AI provider: {provider}")
-        
-        logger.info("rule_generator_initialized", provider=self.provider, model=self.model)
+    def __init__(
+        self,
+        provider: str = "anthropic",
+        model: Optional[str] = None,
+        *,
+        ai_config: Optional[dict] = None,
+    ):
+        # Backward compatible
+        if ai_config is None:
+            ai_config = {
+                "provider": provider,
+                "model": model,
+                "temperature": 0.3,
+                "max_tokens": 8000,
+            }
+        self.ai_config = ai_config
+        self.router = AIProviderRouter(ai_config)
+        self.last_provider_used: Optional[str] = None
+        self.last_model_used: Optional[str] = None
+
+        logger.info(
+            "rule_generator_initialized",
+            primary_provider=self.router.primary,
+        )
     
     def _load_base_rule(self, category: str) -> str:
         """Temel rule dosyasını yükle"""
@@ -139,13 +144,11 @@ Sadece markdown içeriğini döndür, başka açıklama ekleme."""
             
             logger.info("generating_rule", language=language, category=category)
             
-            # AI'dan rule oluştur
-            if self.provider == "anthropic":
-                response = await self._generate_with_anthropic(prompt)
-            elif self.provider == "groq":
-                response = await self._generate_with_groq(prompt)
-            else:
-                response = await self._generate_with_openai(prompt)
+            # AI'dan rule oluştur (simple single-provider routing)
+            system_msg = "Sen bir programlama dili uzmanısın ve kod review kuralları oluşturuyorsun."
+            provider_used, model_used, response = self.router.chat(system=system_msg, user=prompt)
+            self.last_provider_used = provider_used
+            self.last_model_used = model_used
             
             # Dosyayı kaydet
             rule_path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,41 +193,5 @@ Sadece markdown içeriğini döndür, başka açıklama ekleme."""
         
         return results
     
-    async def _generate_with_anthropic(self, prompt: str) -> str:
-        """Anthropic ile rule oluştur"""
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=8000,
-            temperature=0.3,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return message.content[0].text
-    
-    async def _generate_with_openai(self, prompt: str) -> str:
-        """OpenAI ile rule oluştur"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "Sen bir programlama dili uzmanısın ve kod review kuralları oluşturuyorsun."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=8000
-        )
-        return response.choices[0].message.content
-    
-    async def _generate_with_groq(self, prompt: str) -> str:
-        """Groq ile rule oluştur"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "Sen bir programlama dili uzmanısın ve kod review kuralları oluşturuyorsun."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=8000
-        )
-        return response.choices[0].message.content
+    # NOTE: SDK-specific implementations moved to services/ai_providers/*
 
