@@ -341,17 +341,6 @@ async def rules_index(language: str | None = None, category: str | None = None):
     return {"count": len(items), "rules": items}
 
 
-@app.get("/rules/{filename}")
-async def rules_get(filename: str):
-    """Fetch a specific rule file content by filename (e.g. security.md)."""
-    try:
-        return {"filename": filename, "content": get_rule_content(filename)}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Rule not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @app.get("/rules/resolve")
 async def rules_resolve(focus: list[str] = [], language: str | None = None):
     """
@@ -361,6 +350,17 @@ async def rules_resolve(focus: list[str] = [], language: str | None = None):
     """
     try:
         return resolve_rules(focus_areas=focus, language=language)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/rules/{filename}")
+async def rules_get(filename: str):
+    """Fetch a specific rule file content by filename (e.g. security.md)."""
+    try:
+        return {"filename": filename, "content": get_rule_content(filename)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Rule not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
