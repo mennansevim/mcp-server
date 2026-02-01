@@ -6,7 +6,7 @@ import os
 import yaml
 import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
@@ -342,7 +342,7 @@ async def rules_index(language: str | None = None, category: str | None = None):
 
 
 @app.get("/rules/resolve")
-async def rules_resolve(focus: list[str] = [], language: str | None = None):
+async def rules_resolve(focus: list[str] = Query(default=[]), language: str | None = None):
     """
     Resolve which rules apply for focus areas + optional language.
     Example:
