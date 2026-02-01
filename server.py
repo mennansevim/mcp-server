@@ -21,6 +21,7 @@ from webhook import WebhookHandler
 from services import AIReviewer, DiffAnalyzer, CommentService
 from adapters import GitHubAdapter, GitLabAdapter, BitbucketAdapter, AzureAdapter
 from tools import ReviewTools
+from services.rules_service import list_rule_files, get_rule_content, resolve_rules
 
 # Load environment variables
 load_dotenv()
@@ -322,6 +323,46 @@ async def root():
         "status": "healthy",
         "platforms": list(review_server.adapters.keys())
     }
+
+
+@app.get("/rules")
+async def rules_index(language: str | None = None, category: str | None = None):
+    """
+    List available rule markdown files.
+    Optional filters:
+      - language: python/csharp/...
+      - category: security/performance/...
+    """
+    items = list_rule_files()
+    if language:
+        items = [x for x in items if (x.get("language") or "").lower() == language.lower()]
+    if category:
+        items = [x for x in items if (x.get("category") or "").lower() == category.lower()]
+    return {"count": len(items), "rules": items}
+
+
+@app.get("/rules/{filename}")
+async def rules_get(filename: str):
+    """Fetch a specific rule file content by filename (e.g. security.md)."""
+    try:
+        return {"filename": filename, "content": get_rule_content(filename)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/rules/resolve")
+async def rules_resolve(focus: list[str] = [], language: str | None = None):
+    """
+    Resolve which rules apply for focus areas + optional language.
+    Example:
+      /rules/resolve?focus=security&focus=performance&language=python
+    """
+    try:
+        return resolve_rules(focus_areas=focus, language=language)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/webhook")
