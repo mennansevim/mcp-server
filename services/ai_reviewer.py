@@ -1,18 +1,19 @@
 """
-AI-powered code review using OpenAI, Anthropic, or Groq
+AI-powered code review (provider-agnostic).
+
+Supports Groq/OpenAI/Anthropic and is designed to be extended with new providers
+via services/ai_providers/*.
 """
 import os
 import json
 import structlog
 from pathlib import Path
 from typing import List, Optional, Dict
-from anthropic import Anthropic
-from openai import OpenAI
-from groq import Groq
 
 from models import ReviewResult, ReviewIssue, IssueSeverity
 from services.language_detector import LanguageDetector
 from services.rule_generator import RuleGenerator, RULE_CATEGORIES
+from services.ai_providers import AIProviderRouter, AIProviderError
 
 logger = structlog.get_logger()
 
@@ -147,26 +148,41 @@ Provide your review in JSON format:
 Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag false positives than miss real compilation errors. If you see ANY syntax error, type mismatch, or missing keyword → mark as CRITICAL.
 """
     
-    def __init__(self, provider: str = "anthropic", model: Optional[str] = None):
-        self.provider = provider.lower()
-        self.model = model
-        
-        if self.provider == "anthropic":
-            self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            self.model = model or "claude-3-5-sonnet-20241022"
-        elif self.provider == "openai":
-            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self.model = model or "gpt-4-turbo-preview"
-        elif self.provider == "groq":
-            self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-            self.model = model or "llama-3.3-70b-versatile"
-        else:
-            raise ValueError(f"Unsupported AI provider: {provider}")
-        
-        # Rule generator'ı aynı provider ile başlat
-        self.rule_generator = RuleGenerator(provider=provider, model=model)
-        
-        logger.info("ai_reviewer_initialized", provider=self.provider, model=self.model)
+    def __init__(
+        self,
+        provider: str = "anthropic",
+        model: Optional[str] = None,
+        *,
+        ai_config: Optional[dict] = None,
+    ):
+        """
+        Backward compatible:
+          AIReviewer(provider="groq", model="...") still works.
+
+        Recommended:
+          AIReviewer(ai_config=config["ai"])  # supports modular provider selection
+        """
+        if ai_config is None:
+            ai_config = {
+                "provider": provider,
+                "model": model,
+                # keep legacy defaults consistent with config.yaml
+                "temperature": 0.3,
+                "max_tokens": 4096,
+            }
+
+        self.ai_config = ai_config
+        self.router = AIProviderRouter(ai_config)
+        self.last_provider_used: Optional[str] = None
+        self.last_model_used: Optional[str] = None
+
+        # Rule generator uses same config by default
+        self.rule_generator = RuleGenerator(ai_config=ai_config)
+
+        logger.info(
+            "ai_reviewer_initialized",
+            primary_provider=self.router.primary,
+        )
     
     def _load_rules(self, focus_areas: List[str], language: Optional[str] = None) -> str:
         """
@@ -233,7 +249,10 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
         self,
         diff: str,
         files_changed: List[str],
-        focus_areas: List[str]
+        focus_areas: List[str],
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> ReviewResult:
         """
         Review code changes using AI
@@ -287,14 +306,22 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
             
             prompt = "\n".join(prompt_parts)
             
-            logger.info("requesting_ai_review", provider=self.provider, files_count=len(files_changed), rules_loaded=bool(rules))
-            
-            if self.provider == "anthropic":
-                response = await self._review_with_anthropic(prompt)
-            elif self.provider == "groq":
-                response = await self._review_with_groq(prompt)
-            else:
-                response = await self._review_with_openai(prompt)
+            logger.info(
+                "requesting_ai_review",
+                primary_provider=self.router.primary,
+                files_count=len(files_changed),
+                rules_loaded=bool(rules),
+            )
+
+            system_msg = "You are an expert code reviewer."
+            provider_used, model_used, response = self.router.chat(
+                system=system_msg,
+                user=prompt,
+                provider_override=provider,
+                model_override=model,
+            )
+            self.last_provider_used = provider_used
+            self.last_model_used = model_used
             
             # Parse AI response
             review_data = self._parse_ai_response(response)
@@ -377,44 +404,18 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                 approval_recommended=False,
                 block_merge=True
             )
-    
-    async def _review_with_anthropic(self, prompt: str) -> str:
-        """Get review from Anthropic Claude"""
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            temperature=0.3,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+
+    def _build_chat_request(self, system: str, user: str, model: str):
+        # local import to avoid circulars at module import time
+        from services.ai_providers.base import ChatRequest
+
+        return ChatRequest(
+            system=system,
+            user=user,
+            model=model,
+            temperature=self.router.temperature,
+            max_tokens=self.router.max_tokens,
         )
-        return message.content[0].text
-    
-    async def _review_with_openai(self, prompt: str) -> str:
-        """Get review from OpenAI"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are an expert code reviewer."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=4096
-        )
-        return response.choices[0].message.content
-    
-    async def _review_with_groq(self, prompt: str) -> str:
-        """Get review from Groq"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are an expert code reviewer."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=4096
-        )
-        return response.choices[0].message.content
     
     def _parse_ai_response(self, response: str) -> dict:
         """Parse AI response to structured data"""

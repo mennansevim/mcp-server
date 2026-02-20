@@ -12,8 +12,11 @@ mcp:
 
 # AI sağlayıcı ve model ayarları
 ai:
-  provider: "groq"  # openai | anthropic | groq
-  model: "llama-3.3-70b-versatile"  # groq: llama-3.3-70b-versatile, llama-3.1-70b-versatile, mixtral-8x7b-32768 | anthropic: claude-3-5-sonnet-20241022 | openai: gpt-4-turbo-preview
+  provider: "openai"  # openai | anthropic | groq
+  model: "gpt-4o-mini"
+  # Groq models: llama-3.3-70b-versatile, llama-3.1-70b-versatile, mixtral-8x7b-32768
+  # Anthropic: claude-3-5-sonnet-20241022
+  # OpenAI: gpt-4-turbo-preview, gpt-4o, gpt-4o-mini
   temperature: 0.3  # Yaratıcılık seviyesi (0.0-1.0)
   max_tokens: 4096  # Maksimum token sayısı
 

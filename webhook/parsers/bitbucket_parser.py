@@ -10,7 +10,9 @@ class BitbucketParser:
     
     def is_pull_request_event(self, headers: Dict[str, str], body: Dict[str, Any]) -> bool:
         """Check if this is a PR event"""
-        event_key = headers.get('x-event-key', '')
+        # Case-insensitive header lookup (FastAPI headers may vary in casing)
+        headers_lower = {k.lower(): v for k, v in headers.items()}
+        event_key = headers_lower.get('x-event-key', '')
         return event_key in [
             'pullrequest:created',
             'pullrequest:updated',
@@ -21,6 +23,15 @@ class BitbucketParser:
         """Parse Bitbucket webhook to unified format"""
         pr = body['pullrequest']
         repo = body['repository']
+
+        author_obj = pr.get('author') or {}
+        author = (
+            author_obj.get('username')
+            or author_obj.get('display_name')
+            or author_obj.get('nickname')
+            or author_obj.get('uuid')
+            or 'unknown'
+        )
         
         return UnifiedPRData(
             platform=Platform.BITBUCKET,
@@ -31,7 +42,7 @@ class BitbucketParser:
             target_branch=pr['destination']['branch']['name'],
             title=pr['title'],
             description=pr.get('description', ''),
-            author=pr['author']['username'],
+            author=author,
             diff='',  # Will be fetched using API
             files_changed=[],
             additions=0,  # Bitbucket doesn't provide this directly

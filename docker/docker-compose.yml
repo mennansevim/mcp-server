@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   mcp-code-review:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -28,7 +30,7 @@ services:
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
     
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ../config.yaml:/app/config.yaml:ro
     
     restart: unless-stopped
     

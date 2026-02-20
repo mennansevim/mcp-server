@@ -29,6 +29,14 @@ class ReviewTools:
                             "type": "string",
                             "description": "Code snippet or diff to review"
                         },
+                        "provider": {
+                            "type": "string",
+                            "description": "AI provider override (openai, anthropic, groq). If omitted, uses server config."
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Model override (provider-specific)."
+                        },
                         "language": {
                             "type": "string",
                             "description": "Programming language (optional)",
@@ -68,6 +76,14 @@ class ReviewTools:
                             "type": "string",
                             "description": "Code to scan for security issues"
                         },
+                        "provider": {
+                            "type": "string",
+                            "description": "AI provider override (openai, anthropic, groq). If omitted, uses server config."
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Model override (provider-specific)."
+                        },
                         "language": {
                             "type": "string",
                             "description": "Programming language"
@@ -98,16 +114,22 @@ class ReviewTools:
         code = args['code']
         language = args.get('language', 'auto')
         focus = args.get('focus', ['security', 'bugs', 'performance'])
+        provider = args.get("provider")
+        model = args.get("model")
         
         # Perform review
         review_result = await self.ai_reviewer.review(
             diff=code,
             files_changed=[f"code.{language}"],
-            focus_areas=focus
+            focus_areas=focus,
+            provider=provider,
+            model=model,
         )
         
         # Format result
         result = {
+            "ai_provider": getattr(self.ai_reviewer, "last_provider_used", None),
+            "ai_model": getattr(self.ai_reviewer, "last_model_used", None),
             "summary": review_result.summary,
             "score": review_result.score,
             "total_issues": review_result.total_issues,
@@ -162,12 +184,16 @@ class ReviewTools:
         """Focused security scan"""
         code = args['code']
         language = args.get('language', 'auto')
+        provider = args.get("provider")
+        model = args.get("model")
         
         # Perform security-focused review
         review_result = await self.ai_reviewer.review(
             diff=code,
             files_changed=[f"code.{language}"],
-            focus_areas=['security']
+            focus_areas=['security'],
+            provider=provider,
+            model=model,
         )
         
         # Filter only security issues
@@ -177,6 +203,8 @@ class ReviewTools:
         ]
         
         result = {
+            "ai_provider": getattr(self.ai_reviewer, "last_provider_used", None),
+            "ai_model": getattr(self.ai_reviewer, "last_model_used", None),
             "security_score": 10 - len(security_issues),
             "vulnerabilities_found": len(security_issues),
             "critical_count": sum(1 for i in security_issues if i.severity.value == 'critical'),

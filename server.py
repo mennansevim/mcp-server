@@ -6,7 +6,7 @@ import os
 import yaml
 import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
@@ -21,6 +21,7 @@ from webhook import WebhookHandler
 from services import AIReviewer, DiffAnalyzer, CommentService
 from adapters import GitHubAdapter, GitLabAdapter, BitbucketAdapter, AzureAdapter
 from tools import ReviewTools
+from services.rules_service import list_rule_files, get_rule_content, resolve_rules
 
 # Load environment variables
 load_dotenv()
@@ -47,11 +48,9 @@ class CodeReviewServer:
         self.webhook_handler = WebhookHandler()
         
         # Initialize AI reviewer
-        ai_config = config['ai']
-        self.ai_reviewer = AIReviewer(
-            provider=ai_config['provider'],
-            model=ai_config.get('model')
-        )
+        ai_config = config["ai"]
+        # Provider-agnostic / multi-provider aware
+        self.ai_reviewer = AIReviewer(ai_config=ai_config)
         
         self.diff_analyzer = DiffAnalyzer()
         self.comment_service = CommentService()
@@ -159,8 +158,19 @@ class CodeReviewServer:
             # Perform AI review
             print("🤖 Step 3/5: Starting AI code review...")
             review_config = self.config['review']
-            print(f"   Provider: {self.config['ai']['provider'].upper()}")
-            print(f"   Model: {self.config['ai']['model']}")
+            ai_cfg = self.config.get("ai", {})
+            if isinstance(ai_cfg.get("providers"), list) and ai_cfg["providers"]:
+                primary = ai_cfg.get("primary") or ai_cfg["providers"][0].get("name")
+                model = None
+                for p in ai_cfg["providers"]:
+                    if (p.get("name") or "").lower() == (primary or "").lower():
+                        model = p.get("model")
+                        break
+                print(f"   Provider: {str(primary).upper() if primary else 'UNKNOWN'}")
+                print(f"   Model: {model}")
+            else:
+                print(f"   Provider: {ai_cfg.get('provider', 'groq').upper()}")
+                print(f"   Model: {ai_cfg.get('model')}")
             print(f"   Focus areas: {', '.join(review_config.get('focus', []))}")
             print()
             
@@ -247,6 +257,8 @@ class CodeReviewServer:
                 "status": "success",
                 "pr_id": pr_data.pr_id,
                 "platform": pr_data.platform.value,
+                "ai_provider": self.ai_reviewer.last_provider_used,
+                "ai_model": self.ai_reviewer.last_model_used,
                 "score": review_result.score,
                 "issues": review_result.total_issues,
                 "critical": review_result.critical_count
@@ -271,8 +283,16 @@ async def lifespan(app: FastAPI):
     print("🚀 MCP CODE REVIEW SERVER STARTING")
     print("="*80)
     print(f"📊 Version: 1.0.0")
-    print(f"🤖 AI Provider: {config['ai']['provider'].upper()}")
-    print(f"🧠 Model: {config['ai']['model']}")
+    # Backward compatible display (legacy keys) + new multi-provider config
+    ai_cfg = config.get("ai", {})
+    if isinstance(ai_cfg.get("providers"), list) and ai_cfg["providers"]:
+        providers = [p.get("name") for p in ai_cfg["providers"] if isinstance(p, dict)]
+        print(f"🤖 AI Providers: {', '.join([str(p).upper() for p in providers if p])}")
+        primary = ai_cfg.get("primary") or (providers[0] if providers else None)
+        print(f"⭐ Primary: {str(primary).upper() if primary else 'UNKNOWN'}")
+    else:
+        print(f"🤖 AI Provider: {ai_cfg.get('provider', 'groq').upper()}")
+        print(f"🧠 Model: {ai_cfg.get('model')}")
     print(f"🔌 Platforms: {', '.join([p.value for p in review_server.adapters.keys()])}")
     print(f"💬 Comment Strategy: {config['review']['comment_strategy']}")
     print(f"🔍 Focus Areas: {', '.join(config['review']['focus'])}")
@@ -303,6 +323,46 @@ async def root():
         "status": "healthy",
         "platforms": list(review_server.adapters.keys())
     }
+
+
+@app.get("/rules")
+async def rules_index(language: str | None = None, category: str | None = None):
+    """
+    List available rule markdown files.
+    Optional filters:
+      - language: python/csharp/...
+      - category: security/performance/...
+    """
+    items = list_rule_files()
+    if language:
+        items = [x for x in items if (x.get("language") or "").lower() == language.lower()]
+    if category:
+        items = [x for x in items if (x.get("category") or "").lower() == category.lower()]
+    return {"count": len(items), "rules": items}
+
+
+@app.get("/rules/resolve")
+async def rules_resolve(focus: list[str] = Query(default=[]), language: str | None = None):
+    """
+    Resolve which rules apply for focus areas + optional language.
+    Example:
+      /rules/resolve?focus=security&focus=performance&language=python
+    """
+    try:
+        return resolve_rules(focus_areas=focus, language=language)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/rules/{filename}")
+async def rules_get(filename: str):
+    """Fetch a specific rule file content by filename (e.g. security.md)."""
+    try:
+        return {"filename": filename, "content": get_rule_content(filename)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/webhook")
