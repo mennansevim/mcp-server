@@ -13,50 +13,33 @@ logger = structlog.get_logger()
 
 
 class BitbucketAdapter(BasePlatformAdapter):
-    """Bitbucket API client - supports multiple auth methods"""
+    """Bitbucket API client using API Tokens"""
     
     def __init__(self):
-        # Auth method priority:
-        # 1. Repository Access Token (BITBUCKET_REPO_TOKEN) - works with 2FA
-        # 2. User API Token (BITBUCKET_API_TOKEN) - may have 2FA issues
-        # 3. App Password (BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD) - legacy
-        
-        self.repo_token = os.getenv("BITBUCKET_REPO_TOKEN")
+        # Support both API Token (new) and App Password (legacy)
         self.api_token = os.getenv("BITBUCKET_API_TOKEN")
         self.username = os.getenv("BITBUCKET_USERNAME")
         self.app_password = os.getenv("BITBUCKET_APP_PASSWORD")
         
-        # Determine auth type
-        if self.repo_token:
-            self.auth_type = "repo_token"
-        elif self.api_token:
-            self.auth_type = "api_token"
-        elif self.username and self.app_password:
-            self.auth_type = "basic"
-        else:
+        if not self.api_token and not (self.username and self.app_password):
             raise ValueError(
-                "Bitbucket auth required: BITBUCKET_REPO_TOKEN, BITBUCKET_API_TOKEN, "
-                "or (BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD)"
+                "Either BITBUCKET_API_TOKEN or (BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD) required"
             )
         
         self.api_base = "https://api.bitbucket.org/2.0"
+        self.auth_type = "token" if self.api_token else "basic"
+        
         logger.info("bitbucket_adapter_initialized", auth_type=self.auth_type)
     
     def _get_headers(self) -> dict:
         """Get authentication headers"""
-        if self.auth_type == "repo_token":
-            # Repository Access Token uses Bearer auth
-            return {
-                "Authorization": f"Bearer {self.repo_token}",
-                "Accept": "application/json"
-            }
-        elif self.auth_type == "api_token":
+        if self.auth_type == "token":
             return {
                 "Authorization": f"Bearer {self.api_token}",
                 "Accept": "application/json"
             }
         else:
-            # basic auth uses requests.auth
+            # Basic auth will be handled by requests.auth
             return {"Accept": "application/json"}
     
     def _get_auth(self):
@@ -64,7 +47,7 @@ class BitbucketAdapter(BasePlatformAdapter):
         if self.auth_type == "basic":
             from requests.auth import HTTPBasicAuth
             return HTTPBasicAuth(self.username, self.app_password)
-        return None  # repo_token and api_token use headers
+        return None
     
     async def fetch_diff(self, pr_data: UnifiedPRData) -> str:
         """Fetch PR diff from Bitbucket"""
