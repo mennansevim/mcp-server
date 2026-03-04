@@ -67,3 +67,8 @@ logging:
   level: "INFO"  # DEBUG | INFO | WARNING | ERROR
   format: "json"  # json | console
 
+# UI canlı log dashboard ayarları
+ui:
+  logs:
+    poll_interval_seconds: 3  # 1-30 arası polling interval
+    max_events_per_poll: 200  # 20-500 arası event limiti

@@ -1,259 +1,260 @@
-# 🤖 MCP Code Review Server
+# MCP Code Review Server
 
-Platform-agnostic AI-powered code review server with webhook support and MCP integration.
+Platform-agnostic AI code review server with webhook ingestion, MCP tools, live run logs UI, and editable runtime config UI.
 
-## ✨ Features
+## What This Repository Provides
 
-- 🔌 **Platform Agnostic**: Single webhook endpoint for GitHub, GitLab, Bitbucket, Azure DevOps
-- 🤖 **AI-Powered**: Uses Groq (Llama 3.3), Claude, or GPT-4 for intelligent code review
-- 💬 **Multiple Comment Styles**: Summary comments, inline comments, or both
-- 🎯 **Focused Analysis**: Security, performance, bugs, code quality
-- 🔧 **MCP Tools**: Manual code review via Claude Desktop or other MCP clients
-- 🚀 **Easy Integration**: Simple pipeline configuration
+- Single webhook endpoint for GitHub, GitLab, Bitbucket, Azure DevOps
+- AI-based PR diff review via OpenAI / Anthropic / Groq
+- Review result posting back to platform adapters
+- Live log dashboard UI (`/ui/logs`) for active/completed/error runs
+- Config UI (`/ui/config`) to update runtime settings from browser
+- In-memory run/event buffer for near-real-time timeline polling
 
-## 🏗️ Architecture
+## Current Runtime Topology
 
-```
-Pipeline Webhook → MCP Server → Platform Detection → AI Review → Post Comments
-```
+- Backend: FastAPI app (`server.py`)
+- UI: React + Vite build served by FastAPI under `/ui`
+- Logs: In-memory run/event store (non-durable)
+- Config:
+  - Base file: `config.yaml`
+  - Runtime override file: `config.overrides.yaml` (generated/updated by API/UI)
 
-## 📦 Installation
+`server.py` loads config by deep-merging:
+1. `config.yaml`
+2. `config.overrides.yaml` (if exists)
 
-### 1. Clone and Setup
+## Prerequisites
+
+- Python 3.11+ (local run)
+- Node.js 20+ (UI dev/build)
+- Docker (recommended runtime)
+- At least one AI provider key:
+  - `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` or `GROQ_API_KEY`
+- Platform token for real webhook/diff fetch tests:
+  - e.g. `GITHUB_TOKEN`
+
+## 1) Quick Start (Recommended: Docker)
+
+### Step 1: Prepare environment
 
 ```bash
-cd python
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+cp .env.example .env
+```
+
+Edit `.env` and fill at least:
+
+```bash
+OPENAI_API_KEY=...
+GITHUB_TOKEN=...
+```
+
+### Step 2: Build image
+
+```bash
+docker build -f docker/Dockerfile -t mcp-code-review:ui .
+```
+
+### Step 3: Run container
+
+If you want config changes from `/ui/config` to persist across container recreation, mount override file:
+
+```bash
+touch config.overrides.yaml
+
+docker run -d \
+  --name mcp-server-ui \
+  --env-file .env \
+  -e GITHUB_TOKEN="$GITHUB_TOKEN" \
+  -v "$(pwd)/config.overrides.yaml:/app/config.overrides.yaml" \
+  -p 8000:8000 \
+  mcp-code-review:ui
+```
+
+If you do not mount `config.overrides.yaml`, config changes are still applied at runtime but can be lost when container is removed.
+
+### Step 4: Verify
+
+```bash
+curl -s http://localhost:8000/ | python3 -m json.tool
+```
+
+Open:
+
+- Logs dashboard: `http://localhost:8000/ui/logs`
+- Config page: `http://localhost:8000/ui/config`
+
+## 2) Local Development Run
+
+### Backend
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 2. Configuration
-
-Copy `.env.example` to `.env` and configure:
-
-```bash
-# AI Provider (choose one)
-GROQ_API_KEY=your_key
-# or
-ANTHROPIC_API_KEY=your_key
-# or
-OPENAI_API_KEY=your_key
-
-# Platform Tokens
-GITHUB_TOKEN=your_github_token
-GITLAB_TOKEN=your_gitlab_token
-BITBUCKET_USERNAME=your_username
-BITBUCKET_APP_PASSWORD=your_password
-AZURE_DEVOPS_PAT=your_azure_pat
-AZURE_DEVOPS_ORG=https://dev.azure.com/your-org
-```
-
-Edit `config.yaml` for review preferences:
-
-```yaml
-ai:
-  provider: "groq"  # or "anthropic" or "openai"
-  model: "llama-3.3-70b-versatile"  # Groq models
-  # model: "claude-3-5-sonnet-20241022"  # Anthropic
-  # model: "gpt-4-turbo-preview"  # OpenAI
-
-review:
-  comment_strategy: "both"  # summary, inline, both
-  report_levels:
-    - critical
-    - high
-    - medium
-  block_on_critical: true
-```
-
-### 3. Run Server
-
-```bash
 python server.py
 ```
 
-Server runs on `http://localhost:8000`
-
-## 🔧 Pipeline Integration
-
-### Bitbucket Pipelines
-
-See `examples/bitbucket-pipelines.yml`
-
-```yaml
-pipelines:
-  pull-requests:
-    '**':
-      - step:
-          script:
-            - curl -X POST $REVIEW_SERVER_URL/webhook ...
-```
-
-### GitHub Actions
-
-See `examples/github-actions.yml`
-
-```yaml
-- name: Trigger AI Review
-  run: |
-    curl -X POST ${{ secrets.REVIEW_SERVER_URL }}/webhook ...
-```
-
-### GitLab CI/CD
-
-See `examples/gitlab-ci.yml`
-
-```yaml
-ai-code-review:
-  script:
-    - curl -X POST $REVIEW_SERVER_URL/webhook ...
-```
-
-### Azure Pipelines
-
-See `examples/azure-pipelines.yml`
-
-```yaml
-- script: |
-    curl -X POST $(REVIEW_SERVER_URL)/webhook ...
-```
-
-## 🎯 MCP Tools (Manual Review)
-
-Use from Claude Desktop or any MCP client:
-
-### 1. Review Code
-
-```json
-{
-  "tool": "review_code",
-  "arguments": {
-    "code": "def login(username, password):\n    query = f\"SELECT * FROM users WHERE username='{username}'\"",
-    "focus": ["security", "bugs"]
-  }
-}
-```
-
-### 2. Analyze Diff
-
-```json
-{
-  "tool": "analyze_diff",
-  "arguments": {
-    "diff": "--- a/file.py\n+++ b/file.py\n..."
-  }
-}
-```
-
-### 3. Security Scan
-
-```json
-{
-  "tool": "security_scan",
-  "arguments": {
-    "code": "your_code_here",
-    "language": "python"
-  }
-}
-```
-
-## 📊 Review Output
-
-### Summary Comment Example
-
-```markdown
-## 🤖 AI Code Review
-
-**Score:** 7/10 ⚠️
-
-### 📝 Summary
-Good code structure but found some security concerns...
-
-### 📊 Issues Found
-- Total: **5**
-- 🔴 Critical: **1**
-- 🟠 High: **2**
-- 🟡 Medium: **2**
-
-### ⚠️ Important Issues
-
-#### 🔴 SQL Injection Vulnerability
-**Severity:** CRITICAL
-**Location:** `auth.py` (Line 42)
-
-Using string concatenation for SQL queries...
-
-**Suggestion:**
-> Use parameterized queries...
-```
-
-### Inline Comments
-
-Comments posted directly on the problematic code lines.
-
-## 🔒 Security
-
-- Webhook signature verification
-- API token authentication
-- Environment-based secrets
-- No sensitive data logging
-
-## 🚀 Deployment
-
-### Docker
+### UI (optional dev server)
 
 ```bash
-docker build -t mcp-code-review .
-docker run -p 8000:8000 --env-file .env mcp-code-review
+cd ui
+npm install
+npm run dev
 ```
 
-### Production
-
-- Use reverse proxy (nginx, traefik)
-- Enable HTTPS
-- Set up logging and monitoring
-- Configure rate limiting
-
-## 🛠️ Development
+For production serving through FastAPI, build UI:
 
 ```bash
-# Install dev dependencies
-pip install -r requirements.txt
-
-# Run tests
-pytest
-
-# Format code
-black .
+cd ui
+npm run build
 ```
 
-## 📝 API Endpoints
+## 3) Webhook Smoke Test
 
-- `GET /` - Health check
-- `POST /webhook` - Universal webhook endpoint
-- `GET /mcp/sse` - MCP Server-Sent Events endpoint
+Example GitHub PR webhook payload:
 
-## 🤝 Contributing
+```bash
+curl -s -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -H "x-github-event: pull_request" \
+  -d '{
+    "action":"opened",
+    "pull_request":{
+      "number":5,
+      "title":"PR webhook test",
+      "html_url":"https://github.com/owner/repo/pull/5",
+      "diff_url":"https://api.github.com/repos/owner/repo/pulls/5",
+      "head":{"ref":"feature/test","sha":"abc123"},
+      "base":{"ref":"main"},
+      "user":{"login":"octocat"}
+    },
+    "repository":{
+      "full_name":"owner/repo",
+      "html_url":"https://github.com/owner/repo",
+      "id":1
+    }
+  }' | python3 -m json.tool
+```
 
-Contributions welcome! Please:
+Then inspect runs/events:
 
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
+```bash
+curl -s http://localhost:8000/api/logs/runs | python3 -m json.tool
+curl -s http://localhost:8000/api/logs/active/<run_id>/events?cursor=0\&limit=200 | python3 -m json.tool
+```
 
-## 📄 License
+## 4) Config UI and Persistence
 
-MIT License
+Editable fields in `/ui/config`:
 
-## 🆘 Support
+- `ui.logs.poll_interval_seconds`
+- `ui.logs.max_events_per_poll`
+- `review.comment_strategy`
+- `review.focus`
+- `ai.provider`
+- `ai.model` (provider-dependent dropdown)
 
-For issues and questions:
-- Open an issue on GitHub
-- Check documentation
-- Review examples
+Save flow:
 
----
+1. UI sends `PUT /api/config`
+2. Backend validates and applies runtime update
+3. Backend writes editable config to `config.overrides.yaml`
+4. Next startup re-loads with overrides merged on top of `config.yaml`
 
-**Made with ❤️ for better code reviews**
+Environment variables affecting config files:
+
+- `CONFIG_FILE_PATH` (default: `config.yaml`)
+- `CONFIG_OVERRIDES_PATH` (default: `config.overrides.yaml`)
+
+## 5) Main Endpoints
+
+- `GET /` health
+- `POST /webhook` universal webhook
+- `GET /mcp/sse` MCP SSE endpoint
+- `GET /api/logs/config` polling settings
+- `GET /api/logs/active` active runs only
+- `GET /api/logs/runs` all runs (active/completed/error)
+- `GET /api/logs/active/{run_id}/events` incremental run events
+- `GET /api/config` editable config snapshot
+- `PUT /api/config` update + persist editable config
+- `GET /ui/logs` logs dashboard
+- `GET /ui/config` config page
+
+## 6) Tests
+
+Backend tests:
+
+```bash
+python3 -m pytest tests/test_config_api.py tests/test_logs_api.py tests/test_live_log_store.py tests/test_live_log_event_flow.py tests/test_ui_logs_config.py tests/test_ui_routes.py -v
+```
+
+UI tests/build:
+
+```bash
+cd ui
+npm test -- --run
+npm run build
+```
+
+## 7) Troubleshooting
+
+### `Failed to fetch diff`
+
+Most common reason: invalid/missing platform token (e.g. GitHub 401 Bad credentials).
+
+Checks:
+
+```bash
+docker logs --tail 100 mcp-server-ui
+```
+
+Look for `github_fetch_diff_failed` and HTTP status details.
+
+### Dashboard says no active runs
+
+Expected when run quickly transitions to `error` or `completed`.
+
+Use `/api/logs/runs` or dashboard list that includes all statuses.
+
+### UI not opening
+
+Use correct routes:
+
+- `http://localhost:8000/ui/logs`
+- `http://localhost:8000/ui/config`
+
+Not `/logs` or `/config` directly on backend root.
+
+### Config not persisted after recreating container
+
+Mount override file as volume:
+
+```bash
+-v "$(pwd)/config.overrides.yaml:/app/config.overrides.yaml"
+```
+
+## 8) Project Layout (High Level)
+
+- `server.py` FastAPI app + endpoints + runtime config update
+- `adapters/` platform integrations
+- `services/` AI review, diff analysis, rules, live log store
+- `webhook/` parser/handler layer
+- `ui/` React app (logs + config pages)
+- `tests/` backend tests
+- `docker/` Dockerfile and compose files
+- `config.yaml` base config
+- `config.overrides.yaml` runtime editable persisted config (generated)
+
+## 9) Security Notes
+
+- Keep secrets only in env vars (`.env`), never commit real tokens
+- Use webhook signature checks in production where applicable
+- Restrict inbound webhook sources with network controls/reverse proxy
+
+## Additional Docs
+
+- `docs/DEPLOYMENT.md`
+- `docs/PROJECT_STRUCTURE.md`
+- `docs/GITHUB_INTEGRATION.md`
 

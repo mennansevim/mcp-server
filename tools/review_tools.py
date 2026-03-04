@@ -4,7 +4,18 @@ MCP Tools for manual code review
 import json
 import structlog
 from typing import List
-from mcp.types import Tool
+
+try:
+    from mcp.types import Tool
+except ImportError:
+    from dataclasses import dataclass
+    from typing import Any
+
+    @dataclass
+    class Tool:  # type: ignore[override]
+        name: str
+        description: str
+        inputSchema: dict[str, Any]
 
 logger = structlog.get_logger()
 
@@ -220,4 +231,3 @@ class ReviewTools:
         }
         
         return json.dumps(result, indent=2)
-
