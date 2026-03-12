@@ -115,6 +115,7 @@ Files changed:
    - 🤖 **Inconsistent patterns**: Mixing different coding styles in the same file (e.g., callbacks and async/await, var and explicit types)
    
    For each AI slop issue, use category: "ai_slop" and severity: "medium" or "low".
+   **AI Slop issues must NEVER be "critical" or "high" — they are informational quality warnings, NOT merge blockers.**
 
 **MANDATORY RULES - NO EXCEPTIONS:**
 - If you see ANY missing keyword (`await`, `var`, `let`, `const`, `$`, `fn`, `func`, `def`, etc.) → **CRITICAL, block_merge=true**
@@ -323,6 +324,10 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                         }
                         issue["severity"] = severity_map.get(severity_lower, severity_lower)
                 
+                # AI Slop issues must never block merge — cap at medium
+                if issue.get("category") == "ai_slop" and issue.get("severity") in ("critical", "high"):
+                    issue["severity"] = "medium"
+
                 # Ensure critical issues have detailed descriptions
                 if issue.get("severity") == "critical":
                     desc = issue.get("description", "")
