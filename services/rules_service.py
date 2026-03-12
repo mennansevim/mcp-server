@@ -1,20 +1,18 @@
 """
-Rules service: list and fetch rule markdown files safely, and resolve which
-rules apply for a given language + focus areas.
+Rules helper: reads rule markdown files directly from the local filesystem.
+No external service dependency — used as an in-process utility.
 """
 
 from __future__ import annotations
 
+import structlog
 from pathlib import Path
 from typing import Any, Optional
 
-from services.language_detector import LanguageDetector
-
+logger = structlog.get_logger()
 
 RULES_DIR = Path(__file__).parent.parent / "rules"
 
-
-# Mapping of focus areas to rule files (shared with AIReviewer logic)
 FOCUS_RULE_FILES: dict[str, str] = {
     "compilation": "compilation.md",
     "security": "security.md",
@@ -27,93 +25,75 @@ FOCUS_RULE_FILES: dict[str, str] = {
 }
 
 
-def _safe_rule_path(filename: str) -> Path:
-    # Disallow path traversal
-    if "/" in filename or "\\" in filename or filename.startswith(".") or ".." in filename:
-        raise ValueError("Invalid rule filename")
-    p = (RULES_DIR / filename).resolve()
-    if RULES_DIR.resolve() not in p.parents:
-        raise ValueError("Invalid rule filename")
-    return p
+class RulesHelper:
+    """Reads and resolves rule .md files from the local rules/ directory."""
 
+    def __init__(self, rules_dir: Optional[Path] = None):
+        self.rules_dir = rules_dir or RULES_DIR
+        logger.info("rules_helper_initialized", rules_dir=str(self.rules_dir))
 
-def list_rule_files() -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    if not RULES_DIR.exists():
+    def list_rules(
+        self,
+        language: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        if not self.rules_dir.exists():
+            return []
+
+        items: list[dict[str, Any]] = []
+        for p in sorted(self.rules_dir.glob("*.md")):
+            parts = p.stem.split("-", 1)
+            lang = parts[0] if len(parts) == 2 else None
+            cat = parts[1] if len(parts) == 2 else p.stem
+            items.append({"filename": p.name, "language": lang, "category": cat})
+
+        if language:
+            items = [x for x in items if (x.get("language") or "").lower() == language.lower()]
+        if category:
+            items = [x for x in items if (x.get("category") or "").lower() == category.lower()]
         return items
 
-    supported_langs = set(LanguageDetector.get_supported_languages())
+    def get_rule(self, filename: str) -> Optional[str]:
+        if "/" in filename or "\\" in filename or ".." in filename:
+            logger.warning("invalid_rule_filename", filename=filename)
+            return None
 
-    for p in sorted(RULES_DIR.glob("*.md")):
-        name = p.name
-        stem = p.stem  # without .md
-        language: Optional[str] = None
-        category: Optional[str] = None
+        p = self.rules_dir / filename
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+        return None
 
-        # Heuristic: language-specific rules are like "{lang}-{category}.md"
-        # where lang is one of supported languages.
-        parts = stem.split("-", 1)
-        if len(parts) == 2 and parts[0] in supported_langs:
-            language, category = parts[0], parts[1]
-        else:
-            category = stem
+    def resolve_rules(
+        self,
+        focus_areas: list[str],
+        language: Optional[str] = None,
+    ) -> dict[str, Any]:
+        used_files: list[str] = []
+        parts: list[str] = []
 
-        items.append(
-            {
-                "filename": name,
-                "language": language,
-                "category": category,
-            }
-        )
-
-    return items
-
-
-def get_rule_content(filename: str) -> str:
-    p = _safe_rule_path(filename)
-    if not p.exists():
-        raise FileNotFoundError(filename)
-    return p.read_text(encoding="utf-8")
-
-
-def resolve_rules(focus_areas: list[str], language: Optional[str] = None) -> dict[str, Any]:
-    """
-    Resolve which rule files to use for given focus areas and optional language.
-    """
-    used_files: list[str] = []
-    parts: list[str] = []
-
-    supported_langs = set(LanguageDetector.get_supported_languages())
-    if language and language not in supported_langs:
-        # keep behavior strict
-        raise ValueError(f"Unsupported language: {language}")
-
-    for area in focus_areas:
-        area_l = (area or "").lower()
-        base_file = FOCUS_RULE_FILES.get(area_l)
-        if not base_file:
-            continue
-
-        # Prefer language-specific rule file if it exists: "{language}-{category}.md"
-        if language:
-            category = base_file.replace(".md", "")
-            lang_file = f"{language}-{category}.md"
-            lang_path = RULES_DIR / lang_file
-            if lang_path.exists():
-                used_files.append(lang_file)
-                parts.append(f"\n## Rules for {language.upper()}: {area_l.upper()}\n{lang_path.read_text(encoding='utf-8')}")
+        for area in focus_areas:
+            area_l = (area or "").lower()
+            base_file = FOCUS_RULE_FILES.get(area_l)
+            if not base_file:
                 continue
 
-        # Fallback to general file
-        base_path = RULES_DIR / base_file
-        if base_path.exists():
-            used_files.append(base_file)
-            parts.append(f"\n## Rules for: {area_l.upper()}\n{base_path.read_text(encoding='utf-8')}")
+            if language:
+                cat = base_file.replace(".md", "")
+                lang_file = f"{language}-{cat}.md"
+                lang_path = self.rules_dir / lang_file
+                if lang_path.exists():
+                    used_files.append(lang_file)
+                    parts.append(f"\n## Rules for {language.upper()}: {area_l.upper()}\n{lang_path.read_text(encoding='utf-8')}")
+                    continue
 
-    return {
-        "language": language,
-        "focus_areas": focus_areas,
-        "files": used_files,
-        "content": "\n\n".join(parts).strip(),
-    }
+            base_path = self.rules_dir / base_file
+            if base_path.exists():
+                used_files.append(base_file)
+                parts.append(f"\n## Rules for: {area_l.upper()}\n{base_path.read_text(encoding='utf-8')}")
 
+        return {
+            "language": language,
+            "focus_areas": focus_areas,
+            "files": used_files,
+            "content": "\n\n".join(parts).strip(),
+        }
