@@ -3,6 +3,7 @@ from .diff_analyzer import DiffAnalyzer
 from .comment_service import CommentService
 from .language_detector import LanguageDetector
 from .rule_generator import RuleGenerator, RULE_CATEGORIES
+from .rules_service import RulesHelper
 
 __all__ = [
     "AIReviewer",
@@ -10,6 +11,7 @@ __all__ = [
     "CommentService",
     "LanguageDetector",
     "RuleGenerator",
-    "RULE_CATEGORIES"
+    "RULE_CATEGORIES",
+    "RulesHelper",
 ]
 

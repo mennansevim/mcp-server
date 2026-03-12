@@ -1,9 +1,10 @@
-# MCP AI Code Review Server - Teknik Sunum
+# MCP AI Code Review Server — Teknik Sunum
 
 > **Proje:** MCP AI Code Review Server  
 > **Versiyon:** 1.0.0  
 > **Geliştirici:** Mennano  
-> **Tarih:** Şubat 2026
+> **Tarih:** Şubat 2026  
+> **Sunum Formatı:** NotebookLM / PowerPoint uyumlu — her bölüm bir slayta karşılık gelir
 
 ---
 
@@ -13,451 +14,863 @@
 
 **Yapay Zeka Destekli, Platform-Bağımsız Otomatik Kod İnceleme Sistemi**
 
-- 4 Platform Desteği (GitHub, GitLab, Bitbucket, Azure DevOps)
-- 3 AI Provider (OpenAI, Anthropic/Claude, Groq/Llama)
+- 4 Platform: GitHub · GitLab · Bitbucket · Azure DevOps
+- 3 AI Provider: OpenAI (GPT-4) · Anthropic (Claude 3.5) · Groq (Llama 3.3)
 - 25+ Programlama Dili Desteği
-- Otomatik Dil Tespiti ve Dile Özel Rule Sistemi
 - MCP Protokolü ile IDE Entegrasyonu
-- Config Dashboard ile Merkezi Yönetim
+- AI ile Otomatik Rule Üretimi
+- Modüler Template Sistemi ile Özelleştirilebilir PR Yorumları
+- Self-Hosted, Açık Kaynak, Tam Kontrol
 
 ---
 
-## SLAYT 2: Problem Tanımı
+## SLAYT 2: Neden Bu Projeye İhtiyaç Var?
 
-### Neden Bu Projeye İhtiyaç Var?
+### Problem Tanımı
 
-**Mevcut Sorunlar:**
+Yazılım geliştirme sürecinde Pull Request (PR) inceleme aşaması kritik bir kalite kontrol mekanizmasıdır. Ancak mevcut durumda ciddi sorunlar yaşanmaktadır:
 
-| Problem | Etki |
-|---------|------|
-| Manuel kod inceleme çok zaman alıyor | Geliştirici verimliliği düşüyor |
-| İnsan gözü her hatayı yakalayamıyor | Compilation hataları, güvenlik açıkları kaçıyor |
-| Farklı platformlarda farklı araçlar gerekiyor | GitHub'da bir araç, Bitbucket'ta başka bir araç |
-| Tutarsız review kalitesi | Reviewer'a bağlı değişen standartlar |
-| Mevcut çözümler (CodeRabbit vb.) pahalı ve kısıtlı | Platform bağımlılığı, özelleştirme zorluğu |
-| Rule/Standart güncellemeleri manuel | Her güncellemede tüm ekibe bildirim gerekiyor |
+| Problem | Etki | Maliyet |
+|---------|------|---------|
+| Manuel kod inceleme çok zaman alıyor | Geliştirici 2-4 saat/gün review'a harcıyor | Üretkenlik kaybı |
+| İnsan gözü her hatayı yakalayamıyor | Compilation hataları, güvenlik açıkları kaçıyor | Prodüksiyon hataları |
+| Farklı platformlarda farklı araçlar | GitHub'da bir araç, Bitbucket'ta başka | Araç maliyeti + eğitim |
+| Tutarsız review kalitesi | Reviewer'a göre değişen standartlar | Kod kalitesi düşüşü |
+| Mevcut çözümler pahalı | CodeRabbit: $12-24/kullanıcı/ay | Yüksek lisans maliyeti |
+| Mevcut çözümler kısıtlı | Platform bağımlı, özelleştirme zor | Vendor lock-in |
+| Veri gizliliği endişesi | Kod 3. parti sunuculara gidiyor | Compliance riski |
+| Kural/standart güncellemeleri manuel | Her güncelleme tüm ekibe bildirim gerektiriyor | Operasyonel yük |
 
-**Hedefimiz:**
-- Tek webhook endpoint'i ile tüm platformlardan gelen PR'ları otomatik inceleme
-- Şirket standartlarına göre özelleştirilebilir AI kuralları
-- Self-hosted, tamamen kontrol altında bir çözüm
+### Hedefimiz
+
+Tek bir webhook endpoint'i ile tüm platformlardan gelen PR'ları otomatik, tutarlı ve düşük maliyetle inceleyen, şirket standartlarına göre tamamen özelleştirilebilir, self-hosted bir çözüm üretmek.
 
 ---
 
-## SLAYT 3: Genel Mimari
+## SLAYT 3: Neden Python?
+
+### Teknoloji Seçimi Gerekçesi
+
+Python'ın bu proje için tercih edilmesinin somut teknik nedenleri:
+
+**1. AI/ML Ekosisteminin Merkezi**
+- OpenAI, Anthropic ve Groq'un resmi SDK'ları Python-first
+- `openai>=1.3.0`, `anthropic>=0.7.0`, `groq>=0.4.0` — tüm SDK'lar production-ready
+- AI provider'lar arasında geçiş tek satır config değişikliğiyle mümkün
+- Yeni AI provider'lar (Google Gemini, Mistral, vb.) eklemek saatler alıyor, günler değil
+
+**2. Hızlı Prototipleme ve Yüksek Verimlilik**
+- FastAPI ile dakikalar içinde production-ready REST API
+- Pydantic v2 ile tip güvenliği + otomatik validation
+- `async/await` ile native asynchronous I/O — webhook'lar eşzamanlı işlenir
+- Aynı işlevsellik C#/.NET'te 3-4 kat daha fazla kod gerektirir
+
+**3. Platform API Kütüphaneleri**
+- `PyGithub` → GitHub REST API
+- `python-gitlab` → GitLab REST API
+- `atlassian-python-api` → Bitbucket REST API
+- `azure-devops` → Azure DevOps REST API
+- Tüm platform entegrasyonları mature, well-documented Python kütüphaneleri
+
+**4. MCP (Model Context Protocol) Desteği**
+- MCP'nin resmi Python SDK'sı aktif olarak geliştirilmekte
+- IDE entegrasyonu (Claude Desktop, Cursor, VS Code) için MCP Python SDK doğrudan kullanılıyor
+- SSE (Server-Sent Events) transport desteği built-in
+
+**5. Diff Parsing ve Metin İşleme**
+- `unidiff` kütüphanesi ile git diff parsing
+- Python'un güçlü string manipulation yetenekleri
+- Regex, template rendering, markdown işleme natively kolay
+
+**6. DevOps ve Deployment Kolaylığı**
+- Docker image boyutu: ~150MB (python:3.11-slim base)
+- `pip install -r requirements.txt` ile tam dependency yönetimi
+- Railway, Heroku, AWS Lambda gibi PaaS platformlarına dakikalar içinde deploy
+- CI/CD pipeline'larla sorunsuz entegrasyon
+
+**7. Ekip Uyumluluğu ve Bakım**
+- Okunabilir, temiz syntax — yeni ekip üyeleri hızla adapte olur
+- Zengin test ekosistemi (pytest, unittest)
+- `structlog` ile structured JSON logging — production monitoring kolaylığı
+
+### Alternatif Karşılaştırma
+
+| Kriter | Python | Node.js | C#/.NET | Go |
+|--------|--------|---------|---------|-----|
+| AI SDK Olgunluğu | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐ |
+| Platform API Kütüphaneleri | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| Geliştirme Hızı | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
+| MCP SDK Desteği | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ | ⭐ |
+| Async I/O | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Deployment Kolaylığı | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| Topluluk & Ekosistem (AI) | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+
+**Sonuç:** AI-first bir projenin doğal dili Python'dır. SDK desteği, ekosistem zenginliği ve geliştirme hızı açısından açık ara öndedir.
+
+---
+
+## SLAYT 4: Projenin Temelleri — Mimari Genel Bakış
 
 ### Sistem Mimarisi
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        MCP Code Review Server                       │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│   ┌──────────┐     ┌──────────────┐     ┌───────────────────┐      │
-│   │ Webhook  │────▶│  Platform    │────▶│    AI Reviewer     │      │
-│   │ Handler  │     │  Detection   │     │                   │      │
-│   │          │     │              │     │  ┌─────────────┐  │      │
-│   └──────────┘     └──────────────┘     │  │   OpenAI    │  │      │
-│        ▲                                │  │  (GPT-4)    │  │      │
-│        │           ┌──────────────┐     │  ├─────────────┤  │      │
-│  ┌─────┴─────┐     │  Language    │     │  │ Anthropic   │  │      │
-│  │ Platform  │     │  Detector    │────▶│  │  (Claude)   │  │      │
-│  │ Parsers   │     │  (25+ dil)   │     │  ├─────────────┤  │      │
-│  │           │     └──────────────┘     │  │   Groq      │  │      │
-│  │ - GitHub  │                          │  │  (Llama 3.3)│  │      │
-│  │ - GitLab  │     ┌──────────────┐     │  └─────────────┘  │      │
-│  │ - Bitbkt  │     │    Rule      │────▶│                   │      │
-│  │ - Azure   │     │  Generator   │     └───────────────────┘      │
-│  └───────────┘     │  (AI-based)  │              │                 │
-│                    └──────────────┘              ▼                 │
-│                                        ┌───────────────────┐      │
-│   ┌──────────┐     ┌──────────────┐    │ Comment Service   │      │
-│   │   MCP    │     │    Diff      │    │ (Summary+Inline)  │      │
-│   │  Tools   │     │  Analyzer    │    └───────────────────┘      │
-│   │ (SSE)    │     │  (unidiff)   │              │                 │
-│   └──────────┘     └──────────────┘              ▼                 │
-│                                        ┌───────────────────┐      │
-│                                        │ Platform Adapters │      │
-│                                        │ (Yorum Gönderme)  │      │
-│                                        └───────────────────┘      │
-│                                                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  Config Dashboard (UI)  │  Rules API  │  Docker/Podman  │  SSE    │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     MCP AI Code Review Server                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌────────────┐    ┌───────────────┐    ┌─────────────────────────┐     │
+│  │  Webhook   │───▶│   Platform    │───▶│     AI Review Engine    │     │
+│  │  Handler   │    │  Detection    │    │                         │     │
+│  │            │    │  (Auto)       │    │  ┌───────────────────┐  │     │
+│  └────────────┘    └───────────────┘    │  │ Provider Router   │  │     │
+│       ▲                                 │  │                   │  │     │
+│       │            ┌───────────────┐    │  │ ┌─────┐ ┌──────┐ │  │     │
+│  ┌────┴───────┐    │   Language    │    │  │ │Groq │ │OpenAI│ │  │     │
+│  │  Platform  │    │   Detector   │───▶│  │ ├─────┤ ├──────┤ │  │     │
+│  │  Parsers   │    │   (25+ dil)  │    │  │ │Anthr│ │ Mock │ │  │     │
+│  │            │    └───────────────┘    │  │ └─────┘ └──────┘ │  │     │
+│  │ ┌────────┐ │                         │  └───────────────────┘  │     │
+│  │ │GitHub  │ │    ┌───────────────┐    │                         │     │
+│  │ ├────────┤ │    │ Rules Helper  │───▶│  Rules + AI Prompt      │     │
+│  │ │GitLab  │ │    │ (MD→Context)  │    │                         │     │
+│  │ ├────────┤ │    └───────────────┘    └─────────────────────────┘     │
+│  │ │Bitbckt │ │                                    │                    │
+│  │ ├────────┤ │    ┌───────────────┐               ▼                    │
+│  │ │Azure   │ │    │ Rule          │    ┌─────────────────────────┐     │
+│  │ └────────┘ │    │ Generator     │    │    Comment Service      │     │
+│  └────────────┘    │ (AI-powered)  │    │  ┌───────────────────┐  │     │
+│                    └───────────────┘    │  │ Template Engine   │  │     │
+│  ┌────────────┐                         │  │ Default/Detailed/ │  │     │
+│  │  MCP Tools │    ┌───────────────┐    │  │ Executive/Custom  │  │     │
+│  │  (SSE)     │    │ Diff Analyzer │    │  └───────────────────┘  │     │
+│  │            │    │ (unidiff)     │    └─────────────────────────┘     │
+│  │ review_code│    └───────────────┘               │                    │
+│  │ analyze_dif│                                    ▼                    │
+│  │ sec_scan   │                         ┌─────────────────────────┐     │
+│  └────────────┘                         │  Platform Adapters      │     │
+│                                         │  (Yorum + Status Post)  │     │
+│                                         └─────────────────────────┘     │
+├─────────────────────────────────────────────────────────────────────────┤
+│  FastAPI Server │ MCP/SSE │ Docker/Podman │ Structured Logging (JSON) │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Review Akışı (5 Adım):
+### Temel Tasarım İlkeleri
+
+| İlke | Uygulama |
+|------|----------|
+| **Platform Agnostik** | Tek webhook endpoint, otomatik platform tespiti |
+| **Provider Agnostik** | Abstract AI interface, factory pattern ile provider seçimi |
+| **Modüler Mimari** | Her bileşen bağımsız, değiştirilebilir, test edilebilir |
+| **Config-Driven** | Tüm davranışlar `config.yaml` ile yönetilir, kod değişikliği gerektirmez |
+| **Self-Hosted** | Tüm veriler şirket kontrolünde, 3. parti bağımlılığı yok |
+
+---
+
+## SLAYT 5: Review Akışı — Uçtan Uca
+
+### Akış Diyagramı
+
+![MCP Code Review — Nasıl Çalışır?](images/mcp-code-review-flow-diagram.png)
+
+### PR Review Lifecycle (5 Adım)
 
 ```
-1. Webhook Alınır  ───▶  2. Diff Çekilir  ───▶  3. AI İnceleme
-       │                       │                       │
-       ▼                       ▼                       ▼
-  Platform Tespiti       Diff Analizi          Dil Tespiti
-  (Header-based)        (unidiff parse)       + Rule Yükleme
-                                              + AI Prompt
-       │                                           │
-       ▼                                           ▼
-4. Yorum Gönderimi  ◀──────────────────  5. Status Güncelleme
-   (Summary/Inline)                        (Success/Failure)
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  1. WEBHOOK  │────▶│  2. DIFF     │────▶│  3. AI       │
+│  ALINDI      │     │  ÇEKİLDİ     │     │  İNCELEME    │
+│              │     │              │     │              │
+│ Platform     │     │ Adapter ile  │     │ Dil Tespiti  │
+│ Tespiti      │     │ API'den diff │     │ Rule Yükleme │
+│ (Header)     │     │ çekilir      │     │ AI Prompt    │
+└──────────────┘     └──────────────┘     └──────────────┘
+                                                │
+┌──────────────┐     ┌──────────────┐           │
+│  5. STATUS   │◀────│  4. YORUM    │◀──────────┘
+│  GÜNCELLEME  │     │  GÖNDERİMİ   │
+│              │     │              │
+│ success /    │     │ Summary +    │
+│ failure      │     │ Inline       │
+│ (auto block) │     │ (Template)   │
+└──────────────┘     └──────────────┘
 ```
 
 ---
 
-## SLAYT 4: Desteklenen Platformlar
+### Sunum Konuşma Notları (Akış Diyagramı Anlatımı)
+
+> Aşağıdaki notlar, diyagramı sunarken kullanılacak konuşma metnidir.
+> Her bölüm görseldeki ilgili alana karşılık gelir.
+
+---
+
+**[GİRİŞ — Diyagramı Göster]**
+
+> "Şimdi sistemin nasıl çalıştığına bakalım. Bu diyagram, bir PR açıldığı andan yorumun platforma yazıldığı ana kadar olan tüm süreci gösteriyor. Diyagramda iki ana akış var: üstte webhook tabanlı otomatik review akışı, altta ise IDE üzerinden doğrudan kullanım."
+
+---
+
+**[SOL TARAF — Platform Tetikleyicileri]**
+
+> "Süreç en soldan başlıyor. Bir geliştirici GitHub'da, GitLab'da, Bitbucket'ta veya Azure DevOps'ta bir Pull Request açtığında ya da güncellediğinde, platform otomatik olarak bizim sunucuya bir **webhook** gönderir."
+>
+> "Buradaki kritik nokta şu: dört farklı platform, tek bir webhook endpoint'i kullanıyor. Yani `/webhook` adresine gelen isteğin hangi platformdan geldiğini sistem kendisi anlıyor. GitHub, GitLab, Bitbucket, Azure — hepsinden gelen istekler aynı kapıdan giriyor."
+
+---
+
+**[WEBHOOK HANDLER — Platform Algılama]**
+
+> "Gelen webhook isteği **Webhook Handler** bileşenine ulaşıyor. Bu bileşen HTTP header'larına bakarak platformu otomatik tespit ediyor. Örneğin GitHub `X-GitHub-Event` header'ı gönderir, GitLab `X-Gitlab-Event` kullanır."
+>
+> "Platform tespit edildikten sonra, platforma özel **parser** devreye girer. GitHub'ın gönderdiği JSON yapısı ile Bitbucket'ınki tamamen farklı — parser'lar bu farklı formatları alıp hepsini **UnifiedPRData** adında tek bir ortak modele dönüştürür. Böylece sistemin geri kalanı hangi platformdan geldiğini bilmek zorunda kalmaz."
+
+---
+
+**[ORTADAKI İKİ KUTU — Diff Analyzer & Rules Service]**
+
+> "Ortak model oluştuktan sonra iki bileşen **paralel** olarak çalışmaya başlar:"
+>
+> "**Diff Analyzer** — Platform adapter'ı üzerinden PR'ın diff'ini API ile çeker. Hangi dosyalar değişmiş, kaç satır eklenmiş, kaç satır silinmiş — bunları analiz eder. Mesela bir PR'da 4 dosyanın değiştiğini, toplam 120 satır eklendiğini tespit eder."
+>
+> "**Rules Service** — Değişen dosyaların uzantılarına bakarak programlama dilini otomatik tespit eder. `.cs` dosyası varsa C#, `.py` varsa Python, `.go` varsa Go olarak algılar. Sonra o dile özel kuralları yükler. Mesela C# için `csharp-compilation.md`, `csharp-security.md` gibi kural dosyaları devreye girer. Bu kurallar, AI'ın neye dikkat edeceğini belirler."
+
+---
+
+**[MOR KUTU — AI Reviewer]**
+
+> "Burası sistemin kalbi. **AI Reviewer** bileşeni, diff'i ve kuralları alıp yapay zekaya gönderir."
+>
+> "Üç farklı AI sağlayıcıyı destekliyoruz: **OpenAI** (GPT-4), **Anthropic** (Claude) ve **Groq** (Llama). Config dosyasından hangisinin kullanılacağı seçilebilir. Biri başarısız olursa otomatik olarak diğerine geçebilir — buna **fallback** mekanizması diyoruz."
+>
+> "AI, kodu satır satır inceleyip şu çıktıyı üretir:"
+> - "**Score:** 0-10 arası bir kalite puanı"
+> - "**Issues:** Tespit edilen sorunların listesi — her birinin severity'si (critical, high, medium, low), açıklaması, dosya yolu ve satır numarası var"
+> - "**block_merge:** Kritik hata varsa merge'ün engellenmesi önerisi"
+>
+> "Önemli bir özellik daha var: **Short-Circuit mekanizması**. Eğer AI, kodun derlenmeyeceğini fark ederse (syntax hatası, eksik `await`, tip uyumsuzluğu gibi), diğer kategorileri kontrol etmeden durur. Çünkü derlenmeyen kodda güvenlik veya performans analizi yapmanın anlamı yok."
+
+---
+
+**[SAĞ TARAF — Comment Service & Template Engine]**
+
+> "AI'dan gelen sonuçlar **Comment Service** bileşenine aktarılır. Burada **Template Engine** devreye girer."
+>
+> "Üç hazır şablon var:"
+> - "**Default** — Kompakt, kısa özet. Küçük PR'lar için ideal."
+> - "**Detailed** — Her sorun ayrıntılı açıklanır, kod önerileri dahil. Geliştirici odaklı."
+> - "**Executive** — Yönetici bakış açısı. Skor, risk seviyesi, approval durumu ön planda."
+>
+> "Ayrıca `custom_templates/` klasörüne kendi Markdown şablonunuzu koyarak tamamen özel format da oluşturabilirsiniz. Şablon seçimi config'den yapılır, runtime'da API ile de değiştirilebilir."
+
+---
+
+**[GERİ OK — Platforma Dönüş]**
+
+> "Formatlanan yorum, geldiği platforma geri gönderilir. PR'a bir **summary comment** olarak eklenir. Config'e göre satır bazlı **inline comment'ler** de eklenebilir."
+>
+> "Son olarak PR'ın **status'u** güncellenir:"
+> - "Kritik sorun varsa → **failure** — merge otomatik engellenir"
+> - "Skor 8 veya üstüyse → **success** — onay verilir"
+> - "Aradaysa → **success** ama 'review needed' notu eklenir"
+>
+> "Yani geliştirici PR açar, birkaç saniye içinde AI review yorumu PR'a düşer. Manuel bir işlem yok."
+
+---
+
+**[ALT BÖLÜM — MCP IDE Entegrasyonu]**
+
+> "Diyagramın alt kısmında farklı bir kullanım senaryosu var: **IDE entegrasyonu**."
+>
+> "Cursor, VS Code veya Claude Desktop gibi IDE'ler, **MCP SSE protokolü** üzerinden doğrudan sunucuya bağlanabiliyor. Webhook'a gerek yok — geliştirici IDE'nin içinden üç araç kullanabiliyor:"
+> - "**review_code** — Seçili kodu AI'a review ettirmek"
+> - "**analyze_diff** — Bir diff'i analiz etmek"
+> - "**security_scan** — Güvenlik taraması yapmak"
+>
+> "Bu sayede PR açmadan önce bile kodunuzu kontrol edebilirsiniz. Bir nevi 'pre-review' imkanı."
+
+---
+
+**[KAPANIŞ]**
+
+> "Özetlersek: Sistem tamamen otomasyona dayalı. PR açılır → webhook gelir → diff çekilir → AI inceler → yorum yazılır → durum güncellenir. Geliştirici hiçbir ekstra adım atmadan, saniyeler içinde AI destekli kod inceleme raporu alır. Üstelik hangi platformu kullanırsanız kullanın, aynı kalitede ve aynı formatta."
+
+---
+
+**Detaylı Akış (Teknik Referans):**
+
+1. **Webhook Alımı** — Platform bir PR açıldığında/güncellendiğinde webhook gönderir
+   - GitHub: `X-GitHub-Event: pull_request`
+   - GitLab: `X-Gitlab-Event: Merge Request Hook`
+   - Bitbucket: `X-Event-Key: pullrequest:created`
+   - Azure DevOps: `X-VSS-ActivityId` header
+   - Fallback: Payload yapısından otomatik tespit
+
+2. **Diff Çekme** — İlgili platform adapter'ı ile PR diff'i API üzerinden çekilir
+   - `unidiff` kütüphanesi ile parse edilir
+   - Değişen dosyalar, eklenen/silinen satırlar çıkarılır
+
+3. **AI İnceleme** — Tespit edilen dile göre kurallar yüklenir, AI'a prompt gönderilir
+   - Dil tespiti (file extension analizi)
+   - Dile özel + genel rule'lar prompt'a eklenir
+   - AI provider seçimi (config'den veya override)
+   - JSON formatında yapılandırılmış yanıt alınır
+
+4. **Yorum Gönderimi** — Seçilen template ile formatlanıp PR'a yorum olarak eklenir
+   - Summary comment (genel değerlendirme)
+   - Inline comments (satır bazlı notlar)
+   - Template sistemi ile özelleştirilebilir format
+
+5. **Status Güncelleme** — PR'ın commit status'u güncellenir
+   - Critical sorun varsa → `failure` (merge engellenir)
+   - Score >= 8 → `success`
+   - Arada → `success` (review needed notu ile)
+
+---
+
+## SLAYT 6: Desteklenen Platformlar
 
 ### 4 Büyük Platform, Tek Webhook Endpoint
 
-| Platform | Adapter | Parser | CI/CD Entegrasyonu | Durum |
-|----------|---------|--------|--------------------|-------|
-| **GitHub** | `GitHubAdapter` | `GitHubParser` | GitHub Actions | ✅ Aktif |
-| **GitLab** | `GitLabAdapter` | `GitLabParser` | GitLab CI/CD | ✅ Aktif |
-| **Bitbucket** | `BitbucketAdapter` | `BitbucketParser` | Bitbucket Pipelines | ✅ Aktif |
-| **Azure DevOps** | `AzureAdapter` | `AzureParser` | Azure Pipelines | ✅ Aktif |
+| Platform | Adapter | Parser | CI/CD Entegrasyonu | Auth Yöntemi | Durum |
+|----------|---------|--------|--------------------|-------------|-------|
+| **GitHub** | `GitHubAdapter` | `GitHubParser` | GitHub Actions | Bearer Token | ✅ Aktif |
+| **GitLab** | `GitLabAdapter` | `GitLabParser` | GitLab CI/CD | Private Token | ✅ Aktif |
+| **Bitbucket** | `BitbucketAdapter` | `BitbucketParser` | Bitbucket Pipelines | App Password (Basic Auth) | ✅ Aktif |
+| **Azure DevOps** | `AzureAdapter` | `AzureParser` | Azure Pipelines | PAT (Personal Access Token) | ✅ Aktif |
 
-### Platform Tespiti - Otomatik Header Algılama
-
-Server, gelen webhook'un hangi platformdan geldiğini **otomatik tespit** eder:
+### Platform Tespiti — Otomatik Header Algılama
 
 ```python
 PLATFORM_HEADERS = {
-    'x-github-event':    Platform.GITHUB,      # GitHub
-    'x-gitlab-event':    Platform.GITLAB,       # GitLab
-    'x-event-key':       Platform.BITBUCKET,    # Bitbucket
-    'x-vss-activityid':  Platform.AZURE,        # Azure DevOps
+    'x-github-event':    Platform.GITHUB,
+    'x-gitlab-event':    Platform.GITLAB,
+    'x-event-key':       Platform.BITBUCKET,
+    'x-vss-activityid':  Platform.AZURE,
 }
 ```
 
-Header bulunamazsa **payload yapısından** da tespit yapabilir (fallback mekanizması).
+Header bulunamazsa **payload yapısından** da tespit yapabilir (fallback mekanizması). Böylece aynı `/webhook` endpoint'i tüm platformlar için çalışır.
 
-### Her Platform İçin Tam Destek:
+### Her Platform İçin Tam Özellik Seti
 
-- **Diff Çekme**: PR/MR değişikliklerini API üzerinden çekme
-- **Summary Yorum**: PR'a genel değerlendirme yorumu ekleme
-- **Inline Yorum**: Sorunlu satırlara doğrudan yorum ekleme
-- **Status Güncelleme**: Commit status'u güncelleme (success/failure/pending)
-- **Merge Bloklama**: Kritik hatalarda merge'ü engelleme
+| Özellik | GitHub | GitLab | Bitbucket | Azure DevOps |
+|---------|--------|--------|-----------|-------------|
+| Diff çekme | ✅ | ✅ | ✅ | ✅ |
+| Summary yorum | ✅ | ✅ | ✅ | ✅ |
+| Inline yorum | ✅ | ✅ | ✅ | ✅ |
+| Status güncelleme | ✅ | ✅ | ✅ | ✅ |
+| Merge bloklama | ✅ | ✅ | ✅ | ✅ |
+
+### Adapter Mimarisi
+
+Tüm adapter'lar `BasePlatformAdapter` abstract sınıfından türer:
+
+```python
+class BasePlatformAdapter(ABC):
+    async def fetch_diff(self, pr_data: UnifiedPRData) -> str: ...
+    async def post_summary_comment(self, pr_data: UnifiedPRData, comment: str): ...
+    async def post_inline_comments(self, pr_data: UnifiedPRData, comments: list): ...
+    async def update_status(self, pr_data: UnifiedPRData, state: str, description: str): ...
+```
+
+Yeni bir platform eklemek = Sadece yeni bir adapter yazmak. Mevcut iş mantığı hiç değişmez.
 
 ---
 
-## SLAYT 5: AI Provider Entegrasyonları
+## SLAYT 7: AI Provider Sistemi
 
-### 3 AI Provider - Tam Esneklik
+### 3 AI Provider — Modüler ve Değiştirilebilir
 
-| Provider | Model | Hız | Maliyet | Kullanım Alanı |
-|----------|-------|-----|---------|----------------|
-| **Groq** | Llama 3.3 70B Versatile | Çok Hızlı | Ücretsiz/Düşük | Varsayılan, yüksek hacimli review |
-| **OpenAI** | GPT-4 Turbo | Orta | Orta | Karmaşık kod analizi |
-| **Anthropic** | Claude 3.5 Sonnet | Orta | Orta-Yüksek | Detaylı güvenlik analizi |
+| Provider | Model(ler) | Hız | Maliyet | Öne Çıkan Kullanım |
+|----------|-----------|-----|---------|---------------------|
+| **Groq** | Llama 3.3 70B Versatile, Llama 3.1 70B, Mixtral 8x7B | ⚡ Çok Hızlı | 💰 Ücretsiz/Düşük | Yüksek hacimli günlük review |
+| **OpenAI** | GPT-4 Turbo, GPT-4o, GPT-4o-mini | 🔄 Orta | 💰💰 Orta | Karmaşık kod analizi |
+| **Anthropic** | Claude 3.5 Sonnet | 🔄 Orta | 💰💰💰 Orta-Yüksek | Detaylı güvenlik analizi |
 
-### OpenAI Entegrasyonu (Yeni Eklenen)
+### Provider-Agnostic Mimari
 
-OpenAI entegrasyonu tam olarak eklendi ve diğer provider'lar ile aynı seviyede çalışıyor:
+Sistem, AI provider'lardan tamamen soyutlanmıştır. `AIProvider` abstract base class'ı tüm provider'lar için ortak arayüzü tanımlar:
 
 ```python
-# ai_reviewer.py
-elif self.provider == "openai":
-    self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    self.model = model or "gpt-4-turbo-preview"
+class AIProvider(ABC):
+    name: str
+
+    @abstractmethod
+    def default_model(self) -> str: ...
+
+    @abstractmethod
+    def chat(self, req: ChatRequest) -> str: ...
 ```
 
-**Desteklenen OpenAI Modelleri:**
-- `gpt-4-turbo-preview` (varsayılan)
-- `gpt-4o`
-- `gpt-4o-mini` (maliyet odaklı)
-- `o1`, `o1-mini` (reasoning odaklı - gelecek roadmap)
+Her provider (`GroqProvider`, `OpenAIProvider`, `AnthropicProvider`) bu interface'i implemente eder. Factory pattern ile isimden instance oluşturulur:
 
-### Provider Değiştirme - Tek Satır Config:
+```python
+provider = create_provider("groq", config)
+```
 
+### AIProviderRouter — Akıllı Yönlendirme
+
+Router, config'deki ayarlara göre doğru provider ve modeli seçer:
+
+```python
+class AIProviderRouter:
+    def resolve(self, provider_override=None, model_override=None) -> SelectedProvider: ...
+    def chat(self, system, user, provider_override=None, model_override=None) -> (name, model, text): ...
+```
+
+**Legacy config (tek provider):**
 ```yaml
-# config.yaml
 ai:
-  provider: "openai"         # openai | anthropic | groq
-  model: "gpt-4-turbo-preview"
+  provider: "groq"
+  model: "llama-3.3-70b-versatile"
   temperature: 0.3
   max_tokens: 4096
 ```
 
+**Yeni config (çoklu provider):**
+```yaml
+ai:
+  temperature: 0.3
+  max_tokens: 4096
+  providers:
+    - name: groq
+      model: llama-3.3-70b-versatile
+    - name: openai
+      model: gpt-4o-mini
+  primary: groq
+```
+
+**Provider değiştirmek = config'de tek satır değişikliği.** Kod hiç değişmez.
+
+### MCP Tool Seviyesinde Override
+
+MCP tool çağrısında provider ve model runtime'da override edilebilir:
+
+```json
+{
+  "code": "def login(user, pwd): ...",
+  "provider": "openai",
+  "model": "gpt-4o",
+  "focus": ["security"]
+}
+```
+
 ---
 
-## SLAYT 6: Dil Tespiti ve Çoklu Dil Desteği
+## SLAYT 8: Dil Tespiti ve Çoklu Dil Desteği
 
 ### 25+ Programlama Dili Otomatik Tespiti
-
-Sistem, PR'daki değişen dosyaların uzantılarından otomatik olarak dili tespit eder:
 
 | Dil Ailesi | Desteklenen Diller | Uzantılar |
 |------------|-------------------|-----------|
 | **.NET** | C# | `.cs`, `.csx` |
 | **JVM** | Java, Kotlin, Scala | `.java`, `.kt`, `.scala` |
-| **Web** | JavaScript, TypeScript | `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs` |
+| **Web Frontend** | JavaScript, TypeScript | `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs` |
 | **Scripting** | Python, Ruby, PHP | `.py`, `.rb`, `.php` |
 | **Sistem** | Go, Rust, C, C++ | `.go`, `.rs`, `.c`, `.cpp`, `.h` |
 | **Mobil** | Swift, Dart | `.swift`, `.dart` |
 | **Shell** | Shell, PowerShell | `.sh`, `.bash`, `.ps1` |
 | **Data** | SQL, YAML, JSON, XML | `.sql`, `.yaml`, `.json`, `.xml` |
-| **Web** | HTML, CSS/SCSS | `.html`, `.css`, `.scss` |
+| **Markup** | HTML, CSS/SCSS | `.html`, `.css`, `.scss` |
 
-### Dil Tespiti Nasıl Çalışır?
+### Nasıl Çalışır?
+
+1. PR'daki değişen dosya listesi alınır (örn: `auth.cs`, `user.cs`, `config.json`)
+2. File extension'lar sayılır (`Counter` ile: `.cs` → 2, `.json` → 1)
+3. En çok kullanılan dil seçilir (örn: **C#**)
+4. Config dosyaları (`package.json`, `Dockerfile`, vb.) false positive önleme amacıyla filtrelenir
 
 ```python
-# 1. Dosya uzantılarından dil tespiti
 detected_language = LanguageDetector.detect_from_files(files_changed)
-
-# 2. En çok kullanılan dili seçer (Counter ile)
-# Örnek: 5 .cs dosyası + 2 .json → Dil: C#
-
-# 3. Config dosyaları (package.json, Dockerfile vb.) 
-#    dil tespitine dahil edilmez (false positive önleme)
+# Örnek: 5 adet .cs + 2 adet .json → Sonuç: "csharp"
 ```
+
+### Dil Tespiti Neden Önemli?
+
+- Dile özel **rule dosyaları** yüklenir (`csharp-security.md`, `python-compilation.md`)
+- AI prompt'una **dil bağlamı** eklenir
+- **False positive** azalır (C# kuralları Python koduna uygulanmaz)
+- Mevcut olmayan dil kuralları **AI ile otomatik oluşturulur** (RuleGenerator)
 
 ---
 
-## SLAYT 7: Rule Sistemi - MD'den API'ye
+## SLAYT 9: Rule Sistemi — AI ile Otomatik Kural Üretimi
 
-### Rules: Markdown Dosyalarından Otomatik API
+### Markdown Tabanlı Kural Yönetimi
 
-Rule sistemi, kuralları `.md` dosyaları olarak saklar ve API üzerinden otomatik günceller.
+Rule sistemi, kod review kurallarını `.md` dosyaları olarak saklar. Bu dosyalar AI prompt'una bağlam olarak eklenir.
 
 **Mevcut Rule Kategorileri:**
 
-| Kategori | Dosya | Öncelik | İçerik |
-|----------|-------|---------|--------|
-| Compilation | `compilation.md` | CRITICAL | Syntax, type hataları, eksik keyword'ler |
-| Security | `security.md` | CRITICAL | SQL injection, XSS, CSRF, secret exposure |
-| Performance | `performance.md` | MEDIUM | N+1 query, gereksiz loop, memory leak |
-| Best Practices | `best-practices.md` | LOW | Clean code, SOLID, naming conventions |
-| .NET Fundamentals | `dotnet-fundamentals.md` | HIGH | Entity Framework, async/await, LINQ |
-| Linter | `linter.md` | LOW | Kod stili, formatting kuralları |
+| Kategori | Dosya | Öncelik | İçerik Özeti |
+|----------|-------|---------|-------------|
+| Compilation | `compilation.md` | 🔴 CRITICAL | Syntax/type hataları, eksik keyword'ler, derleme sorunları |
+| Security | `security.md` | 🔴 CRITICAL | SQL injection, XSS, CSRF, exposed secrets |
+| Performance | `performance.md` | 🟡 MEDIUM | N+1 query, gereksiz loop, memory leak |
+| Best Practices | `best-practices.md` | 🔵 LOW | Clean code, SOLID, naming conventions |
+| .NET Fundamentals | `dotnet-fundamentals.md` | 🟠 HIGH | Entity Framework, async/await, LINQ |
+| Linter | `linter.md` | 🔵 LOW | Formatting, stil kuralları |
 
-### Dile Özel Rule Oluşturma (AI-Powered)
+### Dile Özel Kurallar — Otomatik Üretim
 
-Sistem, tespit edilen dile göre **otomatik olarak dile özel rule dosyaları** oluşturur:
+Her genel kural kategorisi için dile özel versiyonlar bulunur veya otomatik oluşturulur:
 
 ```
 rules/
-├── compilation.md           # Genel compilation kuralları
-├── security.md              # Genel güvenlik kuralları
-├── performance.md           # Genel performans kuralları
-├── best-practices.md        # Genel best practices
-├── csharp-compilation.md    # C# özel compilation kuralları
-├── csharp-security.md       # C# özel güvenlik kuralları
-├── csharp-performance.md    # C# özel performans kuralları
-├── csharp-best-practices.md # C# özel best practices
-├── python-compilation.md    # Python özel compilation kuralları
-├── python-security.md       # Python özel güvenlik kuralları
-├── python-performance.md    # Python özel performans kuralları
-├── python-best-practices.md # Python özel best practices
-├── go-compilation.md        # Go özel kuralları
+├── compilation.md              # Genel compilation kuralları
+├── security.md                 # Genel güvenlik kuralları
+├── performance.md              # Genel performans kuralları
+├── best-practices.md           # Genel best practices
+│
+├── csharp-compilation.md       # C# özel compilation kuralları
+├── csharp-security.md          # C# özel güvenlik kuralları
+├── csharp-performance.md       # C# özel performans kuralları
+├── csharp-best-practices.md    # C# özel best practices
+│
+├── python-compilation.md       # Python özel kuralları
+├── python-security.md
+├── python-performance.md
+├── python-best-practices.md
+│
+├── go-compilation.md           # Go özel kuralları
 ├── go-security.md
 ├── go-performance.md
 └── go-best-practices.md
 ```
 
-### Rule Oluşturma Akışı:
+**Toplam: 18+ rule dosyası, Git ile versiyonlanır**
+
+### AI ile Otomatik Rule Üretimi (RuleGenerator)
+
+Yeni bir dil için rule bulunmadığında, sistem AI ile otomatik oluşturur:
 
 ```
-1. PR gelir → 2. Dil tespiti (örn: C#)
+1. PR gelir → 2. Dil tespiti (örn: Rust)
       │
       ▼
-3. csharp-security.md mevcut mu?
+3. rust-security.md mevcut mu?
       │
-      ├── EVET → Direkt yükle ve AI prompt'a ekle
+      ├── EVET → Direkt yükle, AI prompt'a ekle
       │
-      └── HAYIR → RuleGenerator ile AI'dan oluştur
-                         │
-                         ▼
-                   4. Genel security.md şablonunu al
-                   5. C# diline özel olarak revize et
-                   6. csharp-security.md olarak kaydet
-                   7. Bir sonraki review'da hazır
+      └── HAYIR → RuleGenerator devreye girer:
+                     │
+                     ▼
+                4. Genel security.md şablonunu al
+                5. Rust diline özel olarak AI ile revize et
+                6. rust-security.md olarak kaydet
+                7. Bir sonraki review'da hazır
 ```
 
-### API Kendi Rule'larını Güncel Tutuyor
+### RulesHelper — Kural Yönetim Modülü
 
-- Rule dosyaları bir kez oluşturulunca cache'lenir
-- `force_regenerate=True` ile zorla yenilenebilir
-- Her dil/kategori kombinasyonu için ayrı `.md` dosyası
-- Git ile versiyonlanır, değişiklik geçmişi takip edilir
-- Güncel versiyonlar otomatik indirilir ve uygulanır
+`RulesHelper` sınıfı, rule dosyalarını yerel dosya sisteminden okur ve çözümler:
+
+```python
+class RulesHelper:
+    def list_rules(language=None, category=None) -> list  # Mevcut rule'ları listele
+    def get_rule(filename) -> str | None                  # Belirli rule içeriğini oku
+    def resolve_rules(focus_areas, language=None) -> dict  # Odak alanlarına göre rule çözümleme
+```
+
+Rule'lar API endpoint'leri ile de sorgulanabilir:
+
+| Endpoint | Açıklama |
+|----------|----------|
+| `GET /rules` | Tüm rule dosyalarını listele |
+| `GET /rules?language=csharp` | Dile göre filtrele |
+| `GET /rules/resolve?focus=security&language=python` | Odak alanı + dil çözümle |
+| `GET /rules/{filename}` | Belirli rule içeriğini getir |
 
 ---
 
-## SLAYT 8: Review Çıktısı ve Yorum Stratejileri
+## SLAYT 10: Short-Circuit Review — Akıllı Önceliklendirme
+
+### Compilation Hatası Bulunursa Diğer Kontroller Durur
+
+Sistem, **compilation/syntax hatası** bulduğunda diğer kategorileri (security, performance, vb.) kontrol etmeyi durdurur. Mantık basit: **derlenmeyen kod için güvenlik analizi anlamsızdır.**
+
+**İki katmanlı uygulama:**
+
+**1. AI Prompt Seviyesi (Short-Circuit Talimatı)**
+```
+⚠️ SHORT-CIRCUIT RULE:
+If you find ANY compilation or syntax error (code won't compile/run), STOP immediately.
+Do NOT check security, performance, code quality, or any other category.
+Only report the compilation/syntax errors and nothing else.
+```
+
+**2. Post-Processing Seviyesi (Programatik Filtre)**
+```python
+compilation_issues = [
+    i for i in normalized_issues
+    if i.get("severity") == "critical"
+    and i.get("category", "").lower() in ("compilation", "syntax")
+]
+if compilation_issues:
+    normalized_issues = compilation_issues  # Diğer her şeyi at
+```
+
+### Sonuç
+
+| Senaryo | Davranış |
+|---------|----------|
+| Compilation hatası var | Sadece compilation hataları raporlanır, merge engellenir |
+| Compilation temiz, güvenlik sorunu var | Güvenlik + diğer sorunlar raporlanır |
+| Her şey temiz | Tam rapor, yüksek score |
+
+---
+
+## SLAYT 11: Severity ve Focus Sistemi
+
+### 5 Kademeli Severity (Önem Derecesi)
+
+| Severity | Emoji | Anlam | Aksiyon |
+|----------|-------|-------|---------|
+| **CRITICAL** | 🔴 | Build fail, güvenlik açığı, veri kaybı riski | Merge **otomatik engellenir** |
+| **HIGH** | 🟠 | Logic hataları, major performans sorunları | Düzeltme **kuvvetle önerilir** |
+| **MEDIUM** | 🟡 | Minor performans, code smell | İyileştirme önerilir |
+| **LOW** | 🔵 | Stil sorunları, minor iyileştirmeler | İsteğe bağlı |
+| **INFO** | ℹ️ | Bilgilendirme, not | Sadece bilgi amaçlı |
+
+### 7 Farklı Focus (Odak) Alanı
+
+```yaml
+review:
+  focus:
+    - compilation       # Syntax/compilation hataları (MANDATORY)
+    - security          # Güvenlik açıkları (SQL injection, XSS, vb.)
+    - performance       # Performans sorunları (N+1, memory leak)
+    - bugs              # Logic hataları
+    - code_quality      # Kod kalitesi (DRY, SOLID)
+    - best_practices    # Best practices ve conventions
+    - linter            # Formatting, stil kuralları
+```
+
+Config'den istenmeyen odak alanları kapatılabilir. Örneğin sadece güvenlik taraması:
+```yaml
+focus:
+  - security
+```
+
+### Otomatik Merge Bloklama
+
+```python
+if review_result.block_merge:
+    await adapter.update_status(pr_data, "failure", "Critical issues found")
+```
+
+- Critical issue bulunduğunda PR status'u `failure` olur
+- Branch protection kuralları aktifse merge engellenir
+- Geliştirici düzeltmeyi yapıp push ettiğinde yeni review tetiklenir
+
+### Compilation Kontrol Kapsamı
+
+AI her satırı şu açılardan kontrol eder:
+
+| Kontrol | Örnekler |
+|---------|---------|
+| Eksik keyword | `await`, `async`, `static`, `var`, `const`, `let`, `fn`, `def` |
+| Type mismatch | `string? = 1`, `int = "test"`, `const count: number = "test"` |
+| Hatalı isimler | Typo'lar, yanlış prefix, geçersiz property/method erişimi |
+| Syntax hataları | Eksik noktalı virgül, eşleşmeyen parantez, hatalı indentation |
+| Eksik import/using | Kaldırılan veya unutulan import ifadeleri |
+
+---
+
+## SLAYT 12: Template Sistemi — PR Yorum Formatları
+
+### 4 Farklı Template ile Özelleştirilebilir Yorumlar
+
+PR'a atılan review yorumunun formatı tamamen özelleştirilebilir. Template sistemi modüler olarak `review_templates/` altında yönetilir.
+
+| Template | Hedef Kitle | Özellik | Kullanım |
+|----------|------------|---------|----------|
+| **Default** | Geliştiriciler | Kompakt, öz, hızlı okunur | Günlük PR review |
+| **Detailed** | QA / Tüm ekip | Tüm sorunlar, dosya bazlı dağılım, kod snippet | Feature branch'ler |
+| **Executive** ⭐ | Tech Lead / Manager | Badge'ler, risk analizi, tech debt tahmini | master/main merge |
+| **Custom** | İsteğe bağlı | Kullanıcı tanımlı markdown şablon | Takım özel formatı |
+
+### Executive Template (Varsayılan) — Örnek Çıktı
+
+```markdown
+## 📊 MCP AI Code Review
+
+![Quality](https://img.shields.io/badge/Quality-7%2F10-yellow?style=flat-square)
+![Risk](https://img.shields.io/badge/Risk-MEDIUM-orange?style=flat-square)
+![Issues](https://img.shields.io/badge/Issues-4-blue?style=flat-square)
+![Tech Debt](https://img.shields.io/badge/Tech%20Debt-%2B3.5h-blueviolet?style=flat-square)
+![Merge](https://img.shields.io/badge/Merge-BLOCK-red?style=flat-square)
+
+---
+
+### Overview
+
+| Risk Area | Level | Issues |
+|-----------|:-----:|:------:|
+| **Security** | 🔴 Critical | 1 |
+| **Reliability** | 🟠 High | 2 |
+| **Maintainability** | 🟡 Medium | 1 |
+
+### 🎯 Issues
+
+#### 🔴 SQL Injection Vulnerability
+📍 `auth.py`:42 • 🔒 Security
+
+Using string concatenation for SQL queries...
+
+**Problematic code:**
+```
+query = f"SELECT * FROM users WHERE id={user_id}"
+```
+
+<details>
+<summary><b>💡 Suggestion</b></summary>
+
+> Use parameterized queries with cursor.execute()
+
+</details>
+
+---
+
+> ❌ **MERGE BLOCKED** — 1 critical issue(s). Fix effort: ~3.5h
+```
+
+### Template Mimarisi
+
+```python
+class BaseTemplate(ABC):
+    name: str
+    description: str
+
+    @abstractmethod
+    def render_summary(self, result: ReviewResult, *, show_detailed_table: bool = False) -> str: ...
+```
+
+Tüm template'ler `BaseTemplate`'den türer. Yeni template eklemek = sadece yeni bir Python dosyası.
+
+### Template Seçimi
+
+```yaml
+# config.yaml
+review:
+  template:
+    name: "executive"   # default | detailed | executive | custom
+    # file: "my_team.md"  # Sadece custom template için
+```
+
+### Runtime Template Değiştirme
+
+```
+POST /templates/switch
+Body: {"name": "detailed"}
+```
+
+Sunucu yeniden başlatmaya gerek kalmadan template değiştirilebilir.
+
+### Custom Template
+
+Kullanıcılar kendi markdown şablonlarını `custom_templates/` altına koyarak özel format tanımlayabilir:
+
+```markdown
+# {team_name} Review Report
+Score: {score}/10
+Issues: {total_issues}
+{issues_list}
+```
+
+---
+
+## SLAYT 13: MCP Protokolü ve IDE Entegrasyonu
+
+### MCP (Model Context Protocol) Nedir?
+
+MCP, AI modellerinin harici araçlarla standart bir protokol üzerinden iletişim kurmasını sağlar. Anthropic tarafından geliştirilen bu açık standart, IDE'ler ve AI asistanlar arasında köprü kurar.
+
+### Sunulan MCP Tools
+
+| Tool | Açıklama | Kullanım Senaryosu |
+|------|----------|--------------------|
+| `review_code` | Kod parçacığını AI ile incele | Manuel review, IDE içinden tetikleme |
+| `analyze_diff` | Git diff istatistikleri | Diff büyüklüğü, dosya dağılımı analizi |
+| `security_scan` | Güvenlik odaklı tarama | Sadece güvenlik açıklarını tara |
+
+### SSE Endpoint
+
+```
+GET /mcp/sse → Real-time MCP bağlantısı (Server-Sent Events)
+```
+
+MCP client'lar (Claude Desktop, Cursor, VS Code) bu endpoint üzerinden sunucuya bağlanır.
+
+### Kullanım Örneği — Claude Desktop
+
+```json
+{
+  "tool": "review_code",
+  "arguments": {
+    "code": "def login(user, pwd):\n  query = f\"SELECT * FROM users WHERE u='{user}'\"",
+    "focus": ["security", "bugs"],
+    "language": "python"
+  }
+}
+```
+
+**Yanıt:**
+```json
+{
+  "ai_provider": "groq",
+  "ai_model": "llama-3.3-70b-versatile",
+  "score": 2,
+  "total_issues": 1,
+  "issues": [
+    {
+      "severity": "critical",
+      "title": "SQL Injection Vulnerability",
+      "description": "Using f-string for SQL queries is extremely dangerous...",
+      "suggestion": "Use parameterized queries with cursor.execute()"
+    }
+  ]
+}
+```
+
+### Desteklenen MCP Client'lar
+
+| Client | Platform | Durum |
+|--------|----------|-------|
+| Claude Desktop | macOS, Windows | ✅ Destekleniyor |
+| Cursor IDE | macOS, Windows, Linux | ✅ Destekleniyor |
+| VS Code (Copilot) | Tüm platformlar | ✅ Destekleniyor |
+| Windsurf | macOS, Windows | ✅ Destekleniyor |
+
+---
+
+## SLAYT 14: Yorum Stratejileri
 
 ### 3 Farklı Yorum Stratejisi
 
 ```yaml
 review:
-  comment_strategy: "both"  # summary | inline | both
+  comment_strategy: "summary"  # summary | inline | both
 ```
 
-**1. Summary Comment** - PR'a genel bir yorum:
-```markdown
-## MCP AI Code Review
+**1. Summary Comment** — PR'a genel bir değerlendirme yorumu:
+- Toplam score, issue dağılımı
+- Critical/High sorunların detayları
+- Template sistemi ile formatlanır
+- Merge kararı önerisi
 
-**Score:** 7/10 ⚠️
-
-### 📊 Detaylı Analiz Özeti (Severity × Type)
-
-| Scope / File Path | 🔴 Critical Security | 🔴 Critical Maintainability | ...
-|:------------------|:---:|:---:|...
-| **Overall** | 1 | 0 | ...
-| `auth.py` | 1 | 0 | ...
-
-### 📊 Issues Found
-- Total: **5**
-- 🔴 Critical: **1**
-- 🟠 High: **2**
-- 🟡 Medium: **2**
-
-### ⚠️ Important Issues
-
-#### 🔴 SQL Injection Vulnerability
-**Severity:** CRITICAL
-**Location:** `auth.py` (Line 42)
-
-Using string concatenation for SQL queries...
-
-**Suggestion:**
-> Use parameterized queries...
-
-### 🎯 Recommendation
-❌ **Do not merge** - Critical issues must be fixed first.
-```
-
-**2. Inline Comments** - Sorunlu satırlara doğrudan yorum:
-- Problematic satırın yanına direkt yorum eklenir
+**2. Inline Comments** — Sorunlu satırlara doğrudan yorum:
 - Dosya yolu + satır numarası ile kesin konum
+- Geliştiricinin hemen yanıt verebileceği format
+- Code review conversation'ı başlatır
 
-**3. Both** - İkisini birden kullanma (önerilen)
+**3. Both** — İkisini birden kullanma:
+- Genel değerlendirme + satır bazlı detay
+- Kapsamlı review deneyimi
 
-### 3 Farklı Yorum Template'i (Yeni Feature)
+### Branch-Based Detaylı Analiz
 
-Farklı senaryolara göre seçilebilir PR yorum şablonları:
-
-```yaml
-# config.yaml
-review:
-  comment_template: "detailed"  # minimal | detailed | executive
-```
-
----
-
-**Template 1: Minimal** - Hızlı ve öz, küçük PR'lar için ideal
-
-```markdown
-## MCP AI Review | Score: 8/10 ✅
-
-**3 issues** found (0 critical, 1 high, 2 medium)
-
-| # | Severity | File | Issue |
-|---|----------|------|-------|
-| 1 | 🟠 HIGH | `auth.py:42` | Missing input validation |
-| 2 | 🟡 MED | `utils.py:18` | Unused import |
-| 3 | 🟡 MED | `api.py:65` | Magic number usage |
-
-✅ **Approved** - No blocking issues.
-```
-
-> **Kullanım:** Küçük PR'lar, hotfix'ler, typo düzeltmeleri.  
-> **Avantaj:** Hızlı okunur, PR thread'i kirletmez.
-
----
-
-**Template 2: Detailed (Varsayılan)** - Kapsamlı analiz, açıklamalı
-
-```markdown
-## MCP AI Code Review
-
-**Score:** 7/10 ⚠️
-
-### 📊 Issues Found
-- Total: **5**
-- 🔴 Critical: **1** | 🟠 High: **2** | 🟡 Medium: **2**
-
-### 📊 Detaylı Analiz Özeti (Severity × Type)
-| Scope | 🔴 Crit. Security | 🔴 Crit. Reliability | 🟠 Major Security | ...
-|:------|:--:|:--:|:--:|...
-| **Overall** | 1 | 0 | 1 | ...
-| `auth.py` | 1 | 0 | 1 | ...
-
-### ⚠️ Important Issues
-
-#### 🔴 SQL Injection Vulnerability
-**Severity:** CRITICAL | **File:** `auth.py` (Line 42)
-**Category:** Security
-
-Using string concatenation for SQL queries allows attackers to...
-
-**Suggestion:**
-> Use parameterized queries: `cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))`
-
-#### 🟠 Missing Error Handling
-...
-
-### 🎯 Recommendation
-❌ **Do not merge** - Critical issues must be fixed first.
-
----
-*Generated by MCP AI Code Review Server | Review Score: 7/10*
-```
-
-> **Kullanım:** Standart PR review'lar, feature branch'ler.  
-> **Avantaj:** Tam detay, öneriler, severity tablosu, inline snippet'ler.
-
----
-
-**Template 3: Executive** - Yönetici/Lead odaklı, risk bazlı özet
-
-```markdown
-## MCP AI Review - Executive Summary
-
-### Risk Assessment: ⚠️ MEDIUM RISK
-
-| Metric | Value |
-|--------|-------|
-| **Quality Score** | 7/10 |
-| **Risk Level** | Medium |
-| **Estimated Tech Debt** | +2.5 hours |
-| **Test Coverage Impact** | -3% (estimated) |
-
-### Risk Breakdown
-| Risk Area | Level | Count | Action Required |
-|-----------|-------|-------|-----------------|
-| Security | 🔴 High | 1 | Immediate fix needed |
-| Reliability | 🟠 Medium | 2 | Fix before release |
-| Maintainability | 🟡 Low | 2 | Nice to have |
-
-### Key Decisions Needed
-1. **SQL Injection in auth.py** - Block merge until fixed? → Recommended: YES
-2. **Missing error handling** - Accept tech debt? → Recommended: Fix in this PR
-
-### Summary
-Bu PR'da 1 kritik güvenlik açığı tespit edildi. Authentication modülünde 
-SQL injection riski mevcut. Merge öncesi düzeltme zorunludur. 
-Diğer 4 sorun orta/düşük seviyede olup sprint içinde çözülebilir.
-
----
-*MCP AI Code Review | Executive Report | 2026-02-13*
-```
-
-> **Kullanım:** master/main'e merge, release branch'ler, production deploy öncesi.  
-> **Avantaj:** Karar vericiler için risk odaklı, tech debt tahmini, aksiyon önerileri.
-
----
-
-### Template Seçim Mantığı:
-
-| Koşul | Otomatik Template |
-|-------|-------------------|
-| Diff < 50 satır | `minimal` |
-| Standart PR | `detailed` |
-| Target branch: master/main/production | `executive` |
-| Config'de sabit seçim | Kullanıcı tercihi |
-
-### Detaylı Analiz Tablosu (Branch-Based):
-
-Belirli branch'lere (master, main, preprod, production) yapılan PR'larda otomatik olarak **Severity × Type matris tablosu** eklenir:
+Belirli branch'lere yapılan PR'larda otomatik olarak genişletilmiş analiz tablosu eklenir:
 
 ```yaml
 review:
@@ -468,219 +881,68 @@ review:
     - production
 ```
 
+Bir PR `feature/auth` → `main` hedefindeyse, detaylı tablo otomatik aktif olur.
+
 ---
 
-## SLAYT 9: Review Odak Alanları ve Severity Sistemi
+## SLAYT 15: Data Modeli — Unified PR Abstraction
 
-### 6 Farklı Focus Area
+### Platform-Bağımsız Veri Modelleri
 
-```yaml
-review:
-  focus:
-    - compilation       # Syntax/compilation hataları
-    - security          # Güvenlik açıkları
-    - performance       # Performans sorunları
-    - bugs              # Logic hataları
-    - code_quality      # Kod kalitesi
-    - best_practices    # Best practices
-```
-
-### 5 Kademeli Severity Sistemi
-
-| Severity | Emoji | Anlam | Aksiyon |
-|----------|-------|-------|---------|
-| **CRITICAL** | 🔴 | Build fail, güvenlik açığı, veri kaybı | Merge engellenir |
-| **HIGH** | 🟠 | Logic hataları, major performans sorunları | Düzeltme önerilir |
-| **MEDIUM** | 🟡 | Minor performans, code smell | İyileştirme önerilir |
-| **LOW** | 🔵 | Stil sorunları, minor iyileştirmeler | İsteğe bağlı |
-| **INFO** | ℹ️ | Bilgilendirme, not | Sadece bilgi |
-
-### Otomatik Merge Bloklama:
+Sistem, tüm platformlardaki PR verilerini tek bir birleşik modele dönüştürür:
 
 ```python
-# Critical sorun bulunursa → Merge otomatik engellenir
-if review_result.block_merge:
-    await adapter.update_status(pr_data, "failure", "Critical issues found")
+class UnifiedPRData(BaseModel):
+    platform: Platform           # GITHUB | GITLAB | BITBUCKET | AZURE
+    pr_url: str                  # PR URL'i
+    pr_id: str                   # PR numarası
+    repo_full_name: str          # org/repo formatı
+    source_branch: str           # Kaynak branch
+    target_branch: str           # Hedef branch
+    title: str                   # PR başlığı
+    description: str | None      # PR açıklaması
+    author: str                  # PR sahibi
+    diff: str                    # Unified diff
+    files_changed: list[str]     # Değişen dosya listesi
+    additions: int               # Eklenen satır sayısı
+    deletions: int               # Silinen satır sayısı
+    metadata: dict               # Platform-spesifik metadata
 ```
 
-### Compilation Kontrolleri (Her Satır İncelenir):
+```python
+class ReviewIssue(BaseModel):
+    severity: IssueSeverity      # CRITICAL | HIGH | MEDIUM | LOW | INFO
+    title: str                   # Sorun başlığı
+    description: str             # Detaylı açıklama
+    file_path: str | None        # Dosya yolu
+    line_number: int | None      # Satır numarası
+    line_end: int | None         # Bitiş satırı
+    code_snippet: str | None     # Sorunlu kod parçası
+    suggestion: str | None       # Düzeltme önerisi
+    category: str                # security, performance, compilation, vb.
+```
 
-Sistem her satırı şu açılardan kontrol eder:
-- **Eksik keyword'ler**: `await`, `async`, `static`, `var`, `const`, `let`, `fn`, `def`...
-- **Type mismatch**: `string? = 1`, `int = "test"`
-- **Hatalı property/method isimleri**: Typo, yanlış prefix
-- **Syntax hataları**: Eksik noktalı virgül, eşleşmeyen parantezler
-- **Eksik import'lar**: Kaldırılan using/import ifadeleri
+```python
+class ReviewResult(BaseModel):
+    summary: str                 # Genel değerlendirme
+    score: int                   # 0-10 kalite puanı
+    issues: list[ReviewIssue]    # Bulunan sorunlar
+    total_issues: int            # Otomatik hesaplanır
+    critical_count: int          # Otomatik hesaplanır
+    high_count: int              # Otomatik hesaplanır
+    approval_recommended: bool   # Onay önerisi
+    block_merge: bool            # Merge engelleme
+```
+
+Pydantic v2 ile tip güvenliği, otomatik validation ve JSON serialization sağlanır.
 
 ---
 
-## SLAYT 10: MCP Protokolü ve IDE Entegrasyonu
-
-### MCP (Model Context Protocol) Nedir?
-
-MCP, AI modellerinin harici araçlarla iletişim kurmasını sağlayan standart bir protokoldür.
-
-### Sunulan MCP Tools:
-
-| Tool | Açıklama | Kullanım |
-|------|----------|----------|
-| `review_code` | Kod parçacığı inceleme | Manuel kod review |
-| `analyze_diff` | Git diff analizi ve istatistikleri | Diff bilgisi alma |
-| `security_scan` | Güvenlik odaklı tarama | Güvenlik denetimi |
-
-### Claude Desktop / MCP Client Kullanımı:
-
-```json
-// Tool: review_code
-{
-  "code": "def login(user, pwd):\n  query = f\"SELECT * FROM users WHERE u='{user}'\"",
-  "focus": ["security", "bugs"],
-  "language": "python"
-}
-
-// Sonuç:
-{
-  "score": 2,
-  "total_issues": 3,
-  "issues": [
-    {
-      "severity": "critical",
-      "title": "SQL Injection Vulnerability",
-      "description": "Using f-string for SQL query is extremely dangerous...",
-      "suggestion": "Use parameterized queries with cursor.execute()"
-    }
-  ]
-}
-```
-
-### SSE (Server-Sent Events) Endpoint:
-
-```
-GET /mcp/sse  →  Real-time MCP bağlantısı
-```
-
----
-
-## SLAYT 11: Rider IDE Plugin (Geliştirilme Aşamasında)
-
-### JetBrains Rider Plugin Feature
-
-Rider IDE'ye doğrudan entegre edilen bir plugin geliştiriliyor:
-
-**Planlanan Özellikler:**
-
-| Aksiyon | Açıklama | Durum |
-|---------|----------|-------|
-| **Review Current File** | Açık dosyayı AI ile incele | 🔧 Geliştiriliyor |
-| **Review Selection** | Seçili kodu incele | 🔧 Geliştiriliyor |
-| **Review Staged Changes** | Git staged değişiklikleri incele | 🔧 Geliştiriliyor |
-| **Review Uncommitted Changes** | Tüm uncommitted değişiklikleri incele | 🔧 Geliştiriliyor |
-
-**Teknik Altyapı:**
-- **Dil**: Kotlin (JetBrains Plugin SDK)
-- **Framework**: IntelliJ Platform Plugin
-- **İletişim**: MCP Client → MCP Server (HTTP/SSE)
-- **UI**: Tool Window Factory ile özel panel
-- **Git**: GitService ile local git entegrasyonu
-
-**Plugin Ayarları:**
-- MCP Server URL konfigürasyonu
-- API Key yönetimi
-- Auto-review toggle
-- Custom focus area seçimi
-
----
-
-## SLAYT 12: Config Dashboard
-
-### Config Yönetim Arayüzü
-
-Config dosyalarını web üzerinden yönetebileceğimiz bir dashboard geliştirildi.
-
-**Dashboard Özellikleri:**
-
-| Özellik | Açıklama |
-|---------|----------|
-| **AI Provider Seçimi** | OpenAI, Anthropic, Groq arasında geçiş |
-| **Model Değiştirme** | Her provider için model seçimi |
-| **Platform Yönetimi** | GitHub, GitLab, Bitbucket, Azure enable/disable |
-| **Review Stratejisi** | Summary, Inline, Both seçimi |
-| **Focus Alanları** | İnceleme alanlarını aç/kapat |
-| **Report Level** | Hangi seviyelerin raporlanacağı |
-| **Branch Ayarları** | Detaylı analiz yapılacak branch'ler |
-| **Rule Yönetimi** | Rule dosyalarını görüntüle/düzenle |
-
-**Örnek Config (config.yaml):**
-
-```yaml
-# Server bağlantı ayarları
-server:
-  host: "0.0.0.0"
-  port: 8000
-  debug: false
-
-# AI sağlayıcı ve model ayarları
-ai:
-  provider: "groq"                      # openai | anthropic | groq
-  model: "llama-3.3-70b-versatile"      # Provider'a göre model
-  temperature: 0.3                      # Yaratıcılık seviyesi
-  max_tokens: 4096                      # Maksimum token
-
-# Platform entegrasyonları
-platforms:
-  github:
-    enabled: true
-    api_url: "https://api.github.com"
-  gitlab:
-    enabled: true
-    api_url: "https://gitlab.com/api/v4"
-  bitbucket:
-    enabled: true
-    api_url: "https://api.bitbucket.org/2.0"
-  azure:
-    enabled: true
-    api_url: "https://dev.azure.com"
-
-# Review stratejisi
-review:
-  comment_strategy: "summary"           # inline | summary | both
-  detailed_analysis_branches:           # Detaylı tablo branch'leri
-    - master
-    - main
-    - preprod
-    - production
-  report_levels:                        # Raporlanacak seviyeler
-    - critical
-    - high
-    - medium
-  auto_approve: false                   # Otomatik onay
-  block_on_critical: true               # Critical'da merge engelle
-  focus:                                # İnceleme alanları
-    - compilation
-    - security
-    - performance
-    - bugs
-    - code_quality
-    - best_practices
-
-# Webhook güvenlik
-webhook:
-  verify_signature: true
-  timeout: 300
-
-# Log ayarları
-logging:
-  level: "INFO"
-  format: "json"
-```
-
----
-
-## SLAYT 13: CI/CD Pipeline Entegrasyonları
+## SLAYT 16: CI/CD Pipeline Entegrasyonları
 
 ### Her Platform İçin Hazır Pipeline Config'leri
 
-**GitHub Actions (`examples/github-actions.yml`):**
+**GitHub Actions:**
 ```yaml
 name: AI Code Review
 on:
@@ -699,7 +961,19 @@ jobs:
             -d @$GITHUB_EVENT_PATH
 ```
 
-**Bitbucket Pipelines (`examples/bitbucket-pipelines.yml`):**
+**GitLab CI/CD:**
+```yaml
+ai-code-review:
+  stage: test
+  only:
+    - merge_requests
+  script:
+    - curl -X POST $REVIEW_SERVER_URL/webhook \
+        -H "X-Gitlab-Event: Merge Request Hook" \
+        -d '{ ... }'
+```
+
+**Bitbucket Pipelines:**
 ```yaml
 pipelines:
   pull-requests:
@@ -712,19 +986,7 @@ pipelines:
                 -d '{ ... }'
 ```
 
-**GitLab CI/CD (`examples/gitlab-ci.yml`):**
-```yaml
-ai-code-review:
-  stage: test
-  only:
-    - merge_requests
-  script:
-    - curl -X POST $REVIEW_SERVER_URL/webhook \
-        -H "X-Gitlab-Event: Merge Request Hook" \
-        -d '{ ... }'
-```
-
-**Azure Pipelines (`examples/azure-pipelines.yml`):**
+**Azure Pipelines:**
 ```yaml
 pr:
   - main
@@ -736,30 +998,30 @@ steps:
       -d '{ ... }'
 ```
 
+**Entegrasyon = Tek satır `curl` komutu.** Pipeline'a webhook URL'i ve header eklemek yeterli.
+
 ---
 
-## SLAYT 14: Deployment Seçenekleri
+## SLAYT 17: Deployment ve Altyapı
 
-### Esnek Deployment
+### 5 Farklı Deployment Yöntemi
 
-| Yöntem | Script | Açıklama |
-|--------|--------|----------|
-| **Docker** | `scripts/docker-start.sh` | Standart Docker deployment |
-| **Podman** | `scripts/podman-start.sh` | Rootless container çözümü |
-| **Docker Compose** | `scripts/podman-compose-start.sh` | Compose ile yönetim |
-| **Railway** | `scripts/railway-deploy.sh` | Cloud deployment (PaaS) |
-| **Manuel** | `python server.py` | Direkt çalıştırma |
+| Yöntem | Komut | Kullanım Senaryosu |
+|--------|-------|---------------------|
+| **Docker** | `docker build && docker run` | Production standart |
+| **Podman** | `podman build && podman run` | Rootless container (güvenlik) |
+| **Docker Compose** | `docker-compose up` | Multi-container orchestration |
+| **Railway** | `railway deploy` | Hızlı PaaS deployment |
+| **Manuel** | `python server.py` | Geliştirme ortamı |
 
-### Dockerfile (Multi-stage Build):
+### Dockerfile (Multi-stage Build)
 
 ```dockerfile
-# Builder stage
 FROM python:3.11-slim as builder
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Production stage
 FROM python:3.11-slim
 WORKDIR /app
 COPY --from=builder /root/.local /root/.local
@@ -770,16 +1032,260 @@ HEALTHCHECK --interval=30s --timeout=3s \
 CMD ["python", "server.py"]
 ```
 
-### Redeploy Script (Tek Komut):
+- Multi-stage build ile küçük image boyutu (~150MB)
+- Built-in health check
+- Non-root execution desteği
+
+### Redeploy Script
 
 ```bash
-./scripts/redeploy.sh        # Stop → Build → Start → Health Check
+./scripts/redeploy.sh         # Stop → Build → Start → Health Check
 ./scripts/redeploy.sh --clean # + Eski image'ları temizle
+```
+
+### ngrok ile Lokal Geliştirme
+
+```bash
+ngrok http 8000
+# https://abc123.ngrok-free.dev → localhost:8000
+```
+
+Webhook URL'i olarak ngrok adresi kullanılarak yerel ortamda tam test yapılabilir.
+
+---
+
+## SLAYT 18: Güvenlik
+
+### Çok Katmanlı Güvenlik Modeli
+
+| Katman | Uygulama | Detay |
+|--------|----------|-------|
+| **Webhook İmza Doğrulama** | `verify_signature: true` | Sahte webhook'ları engeller |
+| **API Token Auth** | Bearer token / Basic Auth | Platform bazlı kimlik doğrulama |
+| **Environment Variables** | `.env` dosyası | Secret'lar kod dışında, Git'e eklenmez |
+| **Hassas Veri Loglama Yok** | structlog filtreleri | Token/password bilgileri loglanmaz |
+| **HTTPS Zorunluluğu** | SSL/TLS | Production'da HTTPS ile çalışma |
+| **Rate Limiting** | Reverse proxy | Aşırı istek koruması (nginx/caddy) |
+| **Self-hosted** | Şirket sunucusu | Kod ve veriler tamamen kontrol altında |
+
+### AI Tarafından Taranan Güvenlik Kontrolleri
+
+Review sırasında AI şu güvenlik açıklarını aktif olarak tarar:
+
+| Güvenlik Açığı | Açıklama | Severity |
+|----------------|----------|----------|
+| SQL Injection | String interpolation ile sorgu oluşturma | 🔴 CRITICAL |
+| Cross-Site Scripting (XSS) | Kullanıcı girdisinin escape edilmeden render'ı | 🔴 CRITICAL |
+| Cross-Site Request Forgery (CSRF) | CSRF token eksikliği | 🟠 HIGH |
+| Exposed Secrets | Hardcoded API key, password, token | 🔴 CRITICAL |
+| Unsafe Deserialization | Güvenilmeyen kaynaktan deserialize | 🔴 CRITICAL |
+| Missing Input Validation | Kullanıcı girdisi doğrulanmıyor | 🟠 HIGH |
+| Hardcoded Passwords | Kod içinde sabit parola | 🔴 CRITICAL |
+| Insecure API Calls | HTTP kullanımı, sertifika doğrulama atlanması | 🟠 HIGH |
+
+---
+
+## SLAYT 19: Teknoloji Stack
+
+### Tam Bağımlılık Listesi
+
+| Katman | Teknoloji | Versiyon | Amaç |
+|--------|-----------|---------|------|
+| **Framework** | FastAPI | >=0.104.0 | Async REST API |
+| **ASGI Server** | Uvicorn | >=0.24.0 | Production ASGI server |
+| **Validation** | Pydantic v2 | >=2.5.0 | Tip güvenliği + auto validation |
+| **MCP SDK** | mcp (GitHub) | Latest | Model Context Protocol |
+| **AI - OpenAI** | openai | >=1.3.0 | GPT-4 / GPT-4o SDK |
+| **AI - Anthropic** | anthropic | >=0.7.0 | Claude 3.5 SDK |
+| **AI - Groq** | groq | >=0.4.0 | Llama 3.3 SDK |
+| **GitHub API** | PyGithub | >=2.1.1 | GitHub REST API |
+| **GitLab API** | python-gitlab | >=4.2.0 | GitLab REST API |
+| **Bitbucket API** | atlassian-python-api | >=3.41.0 | Bitbucket REST API |
+| **Azure API** | azure-devops | >=7.1.0b4 | Azure DevOps REST API |
+| **Diff Parse** | unidiff | >=0.7.5 | Git diff parsing |
+| **HTTP** | httpx | >=0.25.0 | Async HTTP client |
+| **Config** | PyYAML | >=6.0.1 | YAML config yönetimi |
+| **Logging** | structlog | >=23.2.0 | JSON structured logging |
+| **Security** | cryptography, PyJWT | >=41.0.7, >=2.8.0 | İmza doğrulama, JWT |
+| **Env** | python-dotenv | >=1.0.0 | .env dosya yükleme |
+| **Git** | GitPython | >=3.1.40 | Local git operasyonları |
+| **Syntax** | Pygments | >=2.17.0 | Kod syntax highlighting |
+| **Runtime** | Python | 3.11+ | Minimum Python sürümü |
+
+### Proje Dizin Yapısı
+
+```
+mcp-server/
+├── server.py                      # Ana FastAPI server + MCP SSE
+├── config.yaml                    # Merkezi konfigürasyon dosyası
+├── requirements.txt               # Python bağımlılıkları
+├── .env                           # Environment variables (Git dışı)
+│
+├── models/
+│   └── schemas.py                 # Pydantic data modelleri (5 model)
+│
+├── services/
+│   ├── ai_reviewer.py             # AI review motoru (prompt + parse)
+│   ├── ai_providers/              # AI provider soyutlama katmanı
+│   │   ├── base.py                #   Abstract AIProvider interface
+│   │   ├── factory.py             #   Provider factory
+│   │   ├── router.py              #   Multi-provider router
+│   │   ├── openai_provider.py     #   OpenAI implementasyonu
+│   │   ├── anthropic_provider.py  #   Anthropic implementasyonu
+│   │   ├── groq_provider.py       #   Groq implementasyonu
+│   │   └── mock_provider.py       #   Test mock provider
+│   ├── comment_service.py         # Yorum formatlama
+│   ├── diff_analyzer.py           # Diff parse/analiz (unidiff)
+│   ├── language_detector.py       # Dil tespiti (25+ dil)
+│   ├── rule_generator.py          # AI ile rule oluşturma
+│   └── rules_service.py           # Rule dosya yönetimi (RulesHelper)
+│
+├── adapters/
+│   ├── base_adapter.py            # Abstract platform adapter
+│   ├── github_adapter.py          # GitHub API adapter
+│   ├── gitlab_adapter.py          # GitLab API adapter
+│   ├── bitbucket_adapter.py       # Bitbucket API adapter
+│   └── azure_adapter.py           # Azure DevOps API adapter
+│
+├── webhook/
+│   ├── handler.py                 # Platform-agnostik webhook handler
+│   └── parsers/                   # Platform-spesifik payload parsers
+│       ├── github_parser.py
+│       ├── gitlab_parser.py
+│       ├── bitbucket_parser.py
+│       └── azure_parser.py
+│
+├── review_templates/              # PR yorum template sistemi
+│   ├── base.py                    #   Abstract base template
+│   ├── default.py                 #   Kompakt template
+│   ├── detailed.py                #   Detaylı template
+│   ├── executive.py               #   Executive (varsayılan)
+│   └── custom.py                  #   Kullanıcı tanımlı template
+│
+├── custom_templates/              # Kullanıcı markdown şablonları
+│   └── example.md
+│
+├── tools/
+│   └── review_tools.py            # MCP Tools (3 tool)
+│
+├── rules/                         # 18+ review kural dosyası (.md)
+│
+├── examples/                      # CI/CD pipeline örnekleri
+│   ├── github-actions.yml
+│   ├── gitlab-ci.yml
+│   ├── bitbucket-pipelines.yml
+│   └── azure-pipelines.yml
+│
+├── docker/
+│   ├── Dockerfile                 # Multi-stage build
+│   └── docker-compose.yml
+│
+├── scripts/                       # Utility scriptler
+│   ├── redeploy.sh
+│   ├── docker-start.sh
+│   ├── podman-start.sh
+│   └── railway-deploy.sh
+│
+├── tests/                         # Test dosyaları
+└── docs/                          # Dokümantasyon
 ```
 
 ---
 
-## SLAYT 15: CodeRabbit vs MCP Code Review Server Karşılaştırması
+## SLAYT 20: Konfigürasyon Yönetimi
+
+### Merkezi Config Dosyası
+
+Tüm sistem davranışı tek bir `config.yaml` dosyasından yönetilir. Kod değişikliği gerektirmez.
+
+```yaml
+# ─── Server Ayarları ───
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+# ─── MCP Bilgileri ───
+mcp:
+  name: "code-review-server"
+  version: "1.0.0"
+
+# ─── AI Provider Ayarları ───
+ai:
+  provider: "groq"                         # openai | anthropic | groq
+  model: "llama-3.3-70b-versatile"
+  temperature: 0.3
+  max_tokens: 4096
+
+# ─── Platform Entegrasyonları ───
+platforms:
+  github:
+    enabled: true
+    api_url: "https://api.github.com"
+  gitlab:
+    enabled: true
+    api_url: "https://gitlab.com/api/v4"
+  bitbucket:
+    enabled: true
+    api_url: "https://api.bitbucket.org/2.0"
+  azure:
+    enabled: true
+    api_url: "https://dev.azure.com"
+
+# ─── Review Stratejisi ───
+review:
+  comment_strategy: "summary"              # summary | inline | both
+  detailed_analysis_branches:
+    - master
+    - main
+    - preprod
+    - production
+  report_levels:
+    - critical
+    - high
+    - medium
+  auto_approve: false
+  block_on_critical: true
+  focus:
+    - compilation
+    - security
+    - performance
+    - bugs
+    - code_quality
+    - best_practices
+  template:
+    name: "executive"                      # default | detailed | executive | custom
+
+# ─── Güvenlik ───
+webhook:
+  verify_signature: true
+  timeout: 300
+
+# ─── Logging ───
+logging:
+  level: "INFO"                            # DEBUG | INFO | WARNING | ERROR
+  format: "json"                           # json | console
+```
+
+### Environment Variables (.env)
+
+```
+GROQ_API_KEY=gsk_xxx...
+OPENAI_API_KEY=sk-xxx...
+ANTHROPIC_API_KEY=sk-ant-xxx...
+GITHUB_TOKEN=ghp_xxx...
+GITLAB_TOKEN=glpat-xxx...
+BITBUCKET_USERNAME=username
+BITBUCKET_APP_PASSWORD=xxx...
+AZURE_DEVOPS_PAT=xxx...
+AZURE_DEVOPS_ORG=org-name
+```
+
+Secret'lar asla config dosyasında veya kodda yer almaz. `.env` dosyası `.gitignore`'a eklidir.
+
+---
+
+## SLAYT 21: CodeRabbit vs MCP Server — Detaylı Karşılaştırma
 
 ### Neden CodeRabbit Yerine Kendi Çözümümüz?
 
@@ -787,329 +1293,220 @@ CMD ["python", "server.py"]
 |---------|------------|----------------------|
 | **Maliyet** | $12-24/kullanıcı/ay | Self-hosted, sadece AI API maliyeti |
 | **Platform Desteği** | GitHub, GitLab | GitHub, GitLab, Bitbucket, Azure DevOps |
-| **AI Provider** | Sabit (kendi modeli) | 3 provider seçeneği + değiştirilebilir |
-| **Özelleştirme** | Sınırlı config | Tam özelleştirilebilir rule sistemi |
+| **AI Provider** | Sabit (kendi modeli) | 3 provider, config ile değiştirilebilir |
+| **AI Model Seçimi** | Yok | Provider + model bazlı seçim |
+| **Özelleştirme** | Sınırlı config | Tam özelleştirilebilir rule + template |
 | **Rule Yönetimi** | UI üzerinden sınırlı | Markdown + AI-powered auto-generation |
-| **Dile Özel Kurallar** | Genel | Otomatik dile özel rule oluşturma |
+| **Dile Özel Kurallar** | Genel kurallar | Otomatik dile özel rule oluşturma |
 | **Veri Gizliliği** | 3. parti sunucular | Self-hosted, tüm veri şirket içinde |
-| **IDE Entegrasyonu** | Yok | MCP + Rider Plugin (geliştirilme aşamasında) |
-| **Dashboard** | Var | Var (config yönetimi) |
-| **API Desteği** | Sınırlı | MCP Tools + REST API |
+| **IDE Entegrasyonu** | Yok | MCP protokolü (Claude, Cursor, VS Code) |
+| **PR Template** | Tek format | 4 farklı template (default/detailed/executive/custom) |
 | **Open Source** | Hayır | Evet (şirket içi) |
-| **Merge Bloklama** | Var | Var (critical severity'de otomatik) |
-| **Detaylı Tablo** | Yok | Severity × Type matris tablosu |
-| **Branch-based Config** | Kısıtlı | Branch'e göre detaylı analiz toggle |
+| **Compilation Check** | Temel | Satır bazlı, dile özel, short-circuit |
+| **Merge Bloklama** | Var | Var (critical'de otomatik) |
+| **Short-Circuit** | Yok | Var (compilation → diğerleri durur) |
+| **Custom Template** | Yok | Markdown tabanlı tam özelleştirme |
+| **Runtime Config** | Yok | API ile runtime template/config değişimi |
 
-### Maliyet Karşılaştırması (10 Kişilik Ekip):
+### 10 Kişilik Ekip — Yıllık Maliyet Karşılaştırması
 
 | | CodeRabbit | MCP Server |
 |---|------------|-----------|
-| Aylık Sabit | $240/ay | $0 |
-| AI API Maliyeti | Dahil | ~$20-50/ay (kullanıma göre) |
+| Aylık Lisans | $240/ay (Pro plan) | $0 |
+| AI API Maliyeti | Dahil | ~$20-50/ay (Groq ile çok düşük) |
 | Sunucu Maliyeti | Dahil | ~$5-20/ay (Railway/VPS) |
-| **Toplam** | **$240/ay** | **~$25-70/ay** |
-| **Yıllık** | **$2,880** | **~$300-840** |
-| **Tasarruf** | - | **%70-90** |
+| **Aylık Toplam** | **$240** | **~$25-70** |
+| **Yıllık Toplam** | **$2,880** | **~$300-840** |
+| **Yıllık Tasarruf** | — | **$2,040-2,580 (%70-90)** |
+
+### 50 Kişilik Ekip — Yıllık Maliyet
+
+| | CodeRabbit | MCP Server |
+|---|------------|-----------|
+| **Yıllık** | **$14,400** | **~$600-1,200** |
+| **Tasarruf** | — | **$13,200+ (%90+)** |
+
+**Not:** Groq (Llama 3.3) kullanıldığında AI API maliyeti neredeyse sıfıra yakındır. MCP Server'ın esas maliyeti sadece küçük bir VPS/container'dır.
 
 ---
 
-## SLAYT 16: Güvenlik
+## SLAYT 22: Piyasada Kullanım Alanları
 
-### Güvenlik Önlemleri
+### AI Code Review Pazarı
 
-| Katman | Uygulama |
-|--------|----------|
-| **Webhook İmza Doğrulama** | `verify_signature: true` - Sahte webhook'ları engeller |
-| **API Token Authentication** | Bearer token ile kimlik doğrulama |
-| **Environment Variables** | Tüm secret'lar `.env` dosyasında, kod dışında |
-| **Hassas Veri Loglama Yok** | Token, password gibi bilgiler loglanmaz |
-| **HTTPS Zorunluluğu** | Production'da HTTPS ile çalışma |
-| **Rate Limiting** | Aşırı istek koruması (reverse proxy ile) |
-| **Self-hosted** | Kod ve veriler tamamen şirket kontrolünde |
+AI destekli kod inceleme araçları, yazılım geliştirme sürecinin en hızlı büyüyen segmentlerinden biridir.
 
-### İncelenen Güvenlik Kontrolleri:
+**Pazar Büyüklüğü:**
+- 2025 yılı itibarıyla AI DevTools pazarı **$5 milyar+** değerinde
+- Yıllık büyüme oranı **%30+** (CAGR)
+- GitHub Copilot: 1.8M+ ücretli kullanıcı (2025)
+- Code review automation pazarı: **$800M+**
 
-AI reviewer, PR'larda şu güvenlik açıklarını tarar:
-- SQL Injection
-- Cross-Site Scripting (XSS)
-- Cross-Site Request Forgery (CSRF)
-- Exposed Secrets/Credentials
-- Unsafe Deserialization
-- Missing Input Validation
-- Hardcoded Passwords
-- Insecure API Calls
+### Mevcut Rakipler ve Konumlandırma
+
+| Araç | Odak | Maliyet | Zayıf Yanı |
+|------|------|---------|-----------|
+| **CodeRabbit** | PR review | $12-24/user/ay | Platform kısıtlı, kapalı kaynak |
+| **Codacy** | Kod kalitesi | $15/user/ay | AI review yok, statik analiz |
+| **SonarQube** | Statik analiz | $150+/yıl | AI yok, yavaş, ağır kurulum |
+| **DeepCode (Snyk)** | Güvenlik | Enterprise fiyat | Sadece güvenlik odaklı |
+| **Amazon CodeGuru** | AWS projeler | Kullanım bazlı | AWS lock-in |
+| **MCP Server** | Tam review | Self-hosted | Kendi kurulumu gerekir |
+
+### Hedef Kullanım Alanları
+
+**1. Kurumsal Yazılım Ekipleri**
+- Çoklu platform kullanan (GitHub + Bitbucket gibi) ekipler
+- Kod gizliliği gerektiren sektörler (finans, sağlık, savunma)
+- Compliance zorunlulukları olan organizasyonlar
+
+**2. Yazılım Danışmanlık Şirketleri**
+- Farklı müşteriler için farklı platformlarda çalışan ekipler
+- Standartlaştırılmış review süreci ihtiyacı
+- Müşteriye özel rule set'leri tanımlama
+
+**3. Startup ve Orta Ölçekli Şirketler**
+- Düşük bütçeyle yüksek kalite review
+- Groq (ücretsiz tier) ile sıfır AI maliyeti
+- Hızlı kurulum, anında kullanım
+
+**4. Açık Kaynak Proje Yöneticileri**
+- Topluluğun PR'larını otomatik inceleme
+- Katkıda bulunanlar için tutarlı geri bildirim
+- CI/CD pipeline'a tek satır entegrasyon
+
+**5. DevOps / Platform Mühendisliği**
+- CI/CD pipeline'ların parçası olarak otomatik kalite kapısı
+- Infrastructure as Code (Terraform, Helm) review
+- Deployment öncesi otomatik güvenlik taraması
+
+**6. Eğitim ve Akademi**
+- Öğrenci kodlarının otomatik değerlendirilmesi
+- Dile özel rule'lar ile öğretim materyali
+- Tutarlı geri bildirim mekanizması
 
 ---
 
-## SLAYT 17: Teknik Altyapı ve Teknoloji Stack
+## SLAYT 23: Projenin Artıları — Neden Tercih Edilmeli?
 
-### Technology Stack
+### Teknik Avantajlar
 
-| Katman | Teknoloji | Versiyon |
-|--------|-----------|---------|
-| **Framework** | FastAPI | >=0.104.0 |
-| **ASGI Server** | Uvicorn | >=0.24.0 |
-| **Data Validation** | Pydantic v2 | >=2.5.0 |
-| **MCP Protocol** | MCP Python SDK | Latest (GitHub) |
-| **AI - OpenAI** | openai | >=1.3.0 |
-| **AI - Anthropic** | anthropic | >=0.7.0 |
-| **AI - Groq** | groq | >=0.4.0 |
-| **GitHub API** | PyGithub | >=2.1.1 |
-| **GitLab API** | python-gitlab | >=4.2.0 |
-| **Bitbucket API** | atlassian-python-api | >=3.41.0 |
-| **Azure API** | azure-devops | >=7.1.0b4 |
-| **Diff Parsing** | unidiff | >=0.7.5 |
-| **HTTP Client** | httpx | >=0.25.0 |
-| **Config** | PyYAML | >=6.0.1 |
-| **Logging** | structlog (JSON) | >=23.2.0 |
-| **Security** | cryptography, PyJWT | >=41.0.7, >=2.8.0 |
-| **Container** | Docker / Podman | - |
-| **Python** | 3.11+ | - |
+| # | Avantaj | Açıklama |
+|---|---------|----------|
+| 1 | **Platform Bağımsızlığı** | 4 platform tek endpoint. Yeni platform = sadece adapter |
+| 2 | **AI Provider Esnekliği** | 3 provider, runtime'da değiştirilebilir. Vendor lock-in yok |
+| 3 | **Modüler Template Sistemi** | 4 hazır template + custom markdown desteği |
+| 4 | **AI Rule Üretimi** | Yeni dil geldiğinde kurallar otomatik oluşturulur |
+| 5 | **Short-Circuit Review** | Compilation hatası → diğer kontroller durur, verimlilik artar |
+| 6 | **25+ Dil Desteği** | Otomatik dil tespiti, dile özel kurallar |
+| 7 | **MCP Entegrasyonu** | IDE'lerden doğrudan kullanım (Claude, Cursor, VS Code) |
+| 8 | **Config-Driven** | Tüm davranış `config.yaml` ile, kod değişikliği gerektirmez |
 
-### Proje Yapısı:
+### İş Avantajları
 
-```
-mcp-server/
-├── server.py                    # Ana server (FastAPI + MCP)
-├── config.yaml                  # Merkezi konfigürasyon
-├── requirements.txt             # Python bağımlılıkları
-├── models/
-│   └── schemas.py               # Pydantic data modelleri
-├── services/
-│   ├── ai_reviewer.py           # AI review motoru
-│   ├── comment_service.py       # Yorum formatlama
-│   ├── diff_analyzer.py         # Diff parse/analiz
-│   ├── language_detector.py     # Dil tespiti (25+ dil)
-│   └── rule_generator.py        # AI-powered rule oluşturma
-├── adapters/
-│   ├── base_adapter.py          # Abstract base class
-│   ├── github_adapter.py        # GitHub API
-│   ├── gitlab_adapter.py        # GitLab API
-│   ├── bitbucket_adapter.py     # Bitbucket API
-│   └── azure_adapter.py         # Azure DevOps API
-├── webhook/
-│   ├── handler.py               # Webhook işleme
-│   └── parsers/                 # Platform-specific parsers
-│       ├── github_parser.py
-│       ├── gitlab_parser.py
-│       ├── bitbucket_parser.py
-│       └── azure_parser.py
-├── tools/
-│   └── review_tools.py          # MCP Tools (3 tool)
-├── rules/                       # Review kuralları (19 dosya)
-│   ├── compilation.md
-│   ├── security.md
-│   ├── performance.md
-│   ├── best-practices.md
-│   ├── csharp-*.md              # C# özel kuralları
-│   ├── python-*.md              # Python özel kuralları
-│   └── go-*.md                  # Go özel kuralları
-├── examples/                    # CI/CD pipeline örnekleri
-│   ├── github-actions.yml
-│   ├── gitlab-ci.yml
-│   ├── bitbucket-pipelines.yml
-│   └── azure-pipelines.yml
-├── docker/
-│   ├── Dockerfile               # Multi-stage build
-│   └── docker-compose.yml
-├── scripts/
-│   ├── redeploy.sh              # Otomatik redeploy
-│   ├── docker-start.sh
-│   ├── podman-start.sh
-│   └── railway-deploy.sh        # Cloud deploy
-├── tests/                       # Test dosyaları
-├── docs/                        # Dokümantasyon
-└── ide-plugins/
-    └── rider-mcp-review/        # Rider IDE Plugin (Kotlin)
+| # | Avantaj | Etki |
+|---|---------|------|
+| 1 | **%70-90 Maliyet Tasarrufu** | CodeRabbit'e kıyasla yıllık binlerce dolar |
+| 2 | **Veri Gizliliği** | Self-hosted, kod asla 3. parti sunuculara gitmez |
+| 3 | **Zaman Tasarrufu** | Manuel review süresi %60-80 azalır |
+| 4 | **Tutarlılık** | Her PR aynı standartlarla incelenir |
+| 5 | **Erken Hata Tespiti** | Compilation/güvenlik hataları merge öncesi yakalanır |
+| 6 | **Ölçeklenebilirlik** | Docker ile yatay ölçekleme, birden fazla instance |
+| 7 | **Compliance** | Self-hosted yapı, GDPR/KVKK uyumlu |
+| 8 | **Öğrenen Sistem** | AI rule generation ile sürekli iyileşen kural tabanı |
+
+---
+
+## SLAYT 24: Kullanım Kılavuzu
+
+### Hızlı Başlangıç — 5 Dakikada Kurulum
+
+**1. Kodu İndir**
+```bash
+git clone https://github.com/mennano/mcp-code-review-server.git
+cd mcp-server
 ```
 
----
+**2. Sanal Ortam ve Bağımlılıklar**
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-## SLAYT 18: Roadmap - Gelecek Planları
+**3. Environment Variables**
+```bash
+cp .env.example .env
+# .env dosyasını düzenle:
+# GROQ_API_KEY=gsk_xxx...
+# GITHUB_TOKEN=ghp_xxx...
+```
 
-### Kısa Vadeli Roadmap (Q1-Q2 2026)
-
-#### 1. Kategori Bazlı Model Seçimi
-Farklı rule kategorileri için farklı AI modelleri kullanabilme:
-
+**4. Config Ayarla**
 ```yaml
-# Planlanan config yapısı:
+# config.yaml
 ai:
-  mode: "auto"  # auto | manual
-  model_routing:
-    compilation:
-      model: "gpt-4o"          # Yüksek doğruluk gereken alan
-      provider: "openai"
-    security:
-      model: "claude-3-5-sonnet"  # Güvenlik analizi
-      provider: "anthropic"
-    performance:
-      model: "llama-3.3-70b"   # Hızlı analiz yeterli
-      provider: "groq"
-    best_practices:
-      model: "gpt-4o-mini"     # Düşük maliyet, basit kontrol
-      provider: "openai"
-    linter:
-      model: "llama-3.1-8b"    # Mini model yeterli
-      provider: "groq"
+  provider: "groq"
+  model: "llama-3.3-70b-versatile"
+platforms:
+  github:
+    enabled: true
+review:
+  template:
+    name: "executive"
 ```
 
-**Auto Mode Akıllı Yönlendirme:**
-- Codebase büyükse → Mini modeller (hız + maliyet optimizasyonu)
-- Güvenlik kritik ise → Büyük modeller (doğruluk önceliği)
-- Diff küçükse → Hızlı modeller
-- Diff büyükse → Parçalayarak farklı modellere dağıtım
-
-#### 2. Public API Oluşturma
-Dışarıya açılabilecek bir REST API:
-
-```
-POST /api/v1/review          # Kod inceleme
-POST /api/v1/security-scan   # Güvenlik taraması
-POST /api/v1/diff-analyze    # Diff analizi
-GET  /api/v1/rules           # Mevcut kuralları listele
-POST /api/v1/rules/generate  # Yeni dil için kural oluştur
-GET  /api/v1/languages       # Desteklenen diller
-GET  /api/v1/stats           # İnceleme istatistikleri
-POST /api/v1/batch-review    # Toplu kod inceleme
+**5. Sunucuyu Başlat**
+```bash
+python server.py
+# 🚀 MCP CODE REVIEW SERVER STARTING
+# ✅ Server ready to receive webhooks!
 ```
 
-**API Kullanım Senaryoları:**
-- CI/CD pipeline'lardan doğrudan API çağrısı
-- 3. parti araçlarla entegrasyon
-- Dashboard'dan review tetikleme
-- Mobil uygulamalar / bot entegrasyonları
-- Webhook kullanmadan direkt review
+**6. Webhook Ayarla**
+- GitHub/GitLab/Bitbucket repo ayarlarına git
+- Webhook URL: `https://your-server.com/webhook`
+- Event: Pull Request
+- Content type: `application/json`
 
-**API Güvenliği:**
-- API Key authentication
-- Rate limiting (tier bazlı)
-- Request/Response logging
-- Swagger/OpenAPI dokümantasyonu
+**7. PR Aç ve İzle**
+- Herhangi bir branch'ten PR açıldığında webhook tetiklenir
+- AI review otomatik yapılır
+- PR'a yorum olarak eklenir
 
-#### 3. PR Yorum Template Sistemi
-3 farklı yorum template'i ile farklı senaryolara uyum:
+### Docker ile Kurulum
 
-| Template | Hedef Kitle | Kullanım |
-|----------|------------|----------|
-| `minimal` | Geliştiriciler | Küçük PR, hotfix, hızlı review |
-| `detailed` | Tüm ekip | Standart PR review (varsayılan) |
-| `executive` | Tech Lead / Manager | Risk analizi, tech debt, karar desteği |
-
-- Config'den sabit seçim veya otomatik seçim (diff boyutu + target branch)
-- Dashboard'dan template önizleme ve özelleştirme
-- Takım bazlı varsayılan template atama
-
-#### 4. Rider IDE Plugin Tamamlama
-- Review Current File → Sonuç paneli
-- Selection review
-- Staged/Uncommitted changes review
-- Tool window ile gerçek zamanlı sonuç gösterimi
-- JetBrains Marketplace'e yayınlama
-
-### Orta Vadeli Roadmap (Q3-Q4 2026)
-
-#### 5. Review İstatistikleri Dashboard
-```
-┌──────────────────────────────────────────────┐
-│           Review Analytics Dashboard          │
-├──────────────────────────────────────────────┤
-│ Toplam Review: 1,234    │  Avg Score: 7.8    │
-│ Critical Bug: 23        │  Fixed Rate: 87%   │
-│ Top 5 Issue:            │  Trend: ↑ 12%      │
-│ 1. Missing await        │                    │
-│ 2. SQL Injection        │                    │
-│ 3. N+1 Query           │                    │
-│ 4. Null Reference      │                    │
-│ 5. Unused Variable     │                    │
-├──────────────────────────────────────────────┤
-│ [Haftalık Grafik]  [Takım Bazlı]  [Dil Bazlı]│
-└──────────────────────────────────────────────┘
+```bash
+docker build -t mcp-review .
+docker run -d --env-file .env -p 8000:8000 mcp-review
 ```
 
-#### 6. Çoklu IDE Plugin Desteği
-- VS Code Extension
-- IntelliJ IDEA Plugin
-- Visual Studio Extension
-- Neovim Plugin
+### Railway (PaaS) ile Kurulum
 
-#### 7. Team/Organization Bazlı Rule Yönetimi
-- Takıma özel rule set'leri
-- Role-based access control
-- Rule versioning ve rollback
-- A/B testing (farklı rule setleri ile karşılaştırma)
-
-#### 8. Akıllı Review Caching
-- Aynı pattern'ler için cache mekanizması
-- Benzer kodlar için önceki review'ları referans alma
-- Incremental review (sadece yeni değişiklikleri incele)
-
-#### 9. PR Review Summary Email/Slack Notifications
-- Slack webhook entegrasyonu
-- Microsoft Teams entegrasyonu
-- Email digest (günlük/haftalık özet)
-- Custom notification rules
+```bash
+railway login
+railway init
+railway deploy
+# Otomatik HTTPS + custom domain desteği
+```
 
 ---
 
-## SLAYT 19: Önerilen Ek Feature'lar
+## SLAYT 25: Canlı Demo Senaryosu
 
-### Modele Göre Tavsiye Edilen Yeni Özellikler
-
-#### 1. Code Complexity Scoring (Karmaşıklık Analizi)
-PR'daki değişikliklerin cyclomatic complexity, cognitive complexity gibi metrikleri ölçülüp rapora eklenmesi:
-
-```markdown
-### 📐 Complexity Analysis
-| Dosya | Cyclomatic | Cognitive | Risk |
-|-------|-----------|-----------|------|
-| auth.py | 15 | 22 | 🔴 High |
-| utils.py | 3 | 4 | 🟢 Low |
-```
-
-**Neden?** Karmaşık kodlar bug üretme olasılığı yüksek olduğundan, erken uyarı mekanizması sağlar.
-
-#### 2. Auto-Fix Suggestion (Otomatik Düzeltme Önerisi)
-AI'ın sadece sorunu bulması değil, aynı zamanda düzeltilmiş kodu da üretmesi ve PR'a "suggested change" olarak eklemesi:
-
-```diff
-- query = f"SELECT * FROM users WHERE id={user_id}"
-+ query = "SELECT * FROM users WHERE id=@user_id"
-+ cursor.execute(query, {"user_id": user_id})
-```
-
-**Neden?** Geliştiricinin düzeltme süresini %50-80 azaltır.
-
-#### 3. Learning from Feedback (Geri Bildirimden Öğrenme)
-Geliştiricilerin AI review yorumlarına verdiği tepkiler (thumbs up/down) ile zamanla daha iyi sonuçlar üretmesi:
-
-```
-👍 Yararlı bulundu → Bu tür tespitleri artır
-👎 Gereksiz bulundu → Bu pattern'i false positive olarak işaretle
-```
-
-**Neden?** Zamanla false positive oranı düşer, ekibe özel review kalitesi artar.
-
----
-
-## SLAYT 20: Demo ve Canlı Gösterim
-
-### Canlı Demo Senaryosu
-
-**Adım 1:** PR açılır (herhangi bir platformda)
-
-**Adım 2:** Webhook tetiklenir
+### Bir PR Açıldığında Server'da Ne Olur?
 
 ```
 🔔 WEBHOOK RECEIVED
-════════════════════════════════════════
-📦 Platform: GITHUB
-🔗 PR #42: Fix user authentication
+════════════════════════════════════════════════════════════════
+📦 Platform: BITBUCKET
+🔗 PR #15: Fix authentication middleware
 👤 Author: developer
 🌿 feature/auth-fix → main
-────────────────────────────────────────
+────────────────────────────────────────────────────────────────
+
 📥 Step 1/5: Fetching diff from platform...
-✅ Diff fetched successfully (2,450 bytes)
+✅ Diff fetched successfully (3,250 bytes)
 
 🔍 Step 2/5: Analyzing diff...
 ✅ Found 3 changed file(s):
@@ -1120,87 +1517,245 @@ Geliştiricilerin AI review yorumlarına verdiği tepkiler (thumbs up/down) ile 
 🤖 Step 3/5: Starting AI code review...
    Provider: GROQ
    Model: llama-3.3-70b-versatile
-   Focus areas: compilation, security, performance, bugs
+   Focus areas: compilation, security, performance, bugs, code_quality, best_practices
 
 ✅ AI Review completed!
-   Score: 6/10
-   Issues: 4 total
+   Score: 5/10
+   Issues: 3 total
    🔴 Critical: 1
    🟠 High: 1
-   🟡 Medium: 2
+   🟡 Medium: 1
 
 💬 Step 4/5: Posting review comments...
-   📝 Summary comment posted
-   💭 3 inline comments posted
+   Strategy: summary
+   📊 Detailed analysis table enabled for target branch: main
+   📝 Posting summary comment...
+   ✅ Summary comment posted
 
 📊 Step 5/5: Updating PR status...
-   ❌ Status: FAILURE (Critical issues found)
+   ❌ Status: FAILURE
+   Message: Critical issues found - merge blocked
 
-🎉 REVIEW COMPLETED
-════════════════════════════════════════
+🎉 REVIEW COMPLETED SUCCESSFULLY
+   PR: #15
+   Score: 5/10
+   Issues: 3
+   Status: BLOCKED
+════════════════════════════════════════════════════════════════
 ```
 
-**Adım 3:** PR'da AI review yorumları görünür
+### PR'da Görünen Executive Template Yorumu
 
-**Adım 4:** Geliştirici düzeltmeleri yapar, yeni commit push eder
+PR altında shields.io badge'leri, risk tablosu, sorunlu kod snippet'leri ve açılır/kapanır suggestion'lar içeren görsel zengin bir yorum belirir.
 
-**Adım 5:** Webhook tekrar tetiklenir, yeni review yapılır
-
-**Adım 6:** Sorunlar düzeltilmişse → Score artar → Merge açılır
+Geliştirici düzeltmeleri yapıp push ettiğinde yeni review tetiklenir → Score artar → Merge açılır.
 
 ---
 
-## SLAYT 21: Sonuç ve Özet
+## SLAYT 26: Roadmap — Gelecek Planları
 
-### Proje Değer Önerisi
+### Kısa Vade (Q1-Q2 2026)
 
-| Değer | Açıklama |
-|-------|----------|
-| **Zaman Tasarrufu** | Manuel review süresi %60-80 azalır |
-| **Tutarlılık** | Her PR aynı standartlarla incelenir |
-| **Erken Hata Tespiti** | Compilation/güvenlik hataları merge öncesi yakalanır |
-| **Maliyet Optimizasyonu** | CodeRabbit'e göre %70-90 tasarruf |
-| **Esneklik** | 4 platform, 3 AI provider, 25+ dil |
-| **Kontrol** | Self-hosted, tamamen şirket kontrolünde |
-| **Ölçeklenebilirlik** | Docker/Podman ile kolay ölçekleme |
-| **Öğrenen Sistem** | AI-powered rule generation, dile özel kurallar |
+| # | Feature | Açıklama | Durum |
+|---|---------|----------|-------|
+| 1 | **Kategori Bazlı Model Seçimi** | Her focus area için farklı AI model | 📋 Planlanan |
+| 2 | **Auto Mode** | Diff boyutu + kritikliğe göre otomatik model seçimi | 📋 Planlanan |
+| 3 | **Public REST API** | Webhook kullanmadan direkt review API'si | 📋 Planlanan |
+| 4 | **API Rate Limiting** | Tier bazlı API kullanım limitleri | 📋 Planlanan |
 
-### Anahtar Metrikler:
+**Kategori Bazlı Model Seçimi Planı:**
+```yaml
+ai:
+  mode: "auto"                    # auto | manual
+  model_routing:
+    compilation:
+      provider: "openai"
+      model: "gpt-4o"            # Yüksek doğruluk
+    security:
+      provider: "anthropic"
+      model: "claude-3-5-sonnet"  # Güvenlik uzmanlığı
+    performance:
+      provider: "groq"
+      model: "llama-3.3-70b"     # Hızlı analiz
+    best_practices:
+      provider: "openai"
+      model: "gpt-4o-mini"       # Düşük maliyet
+```
+
+**Auto Mode Mantığı:**
+- Diff küçükse (< 50 satır) → Hızlı ve ucuz model
+- Güvenlik kritikse → Büyük ve doğru model
+- Codebase büyükse → Paralel parçalama + mini modeller
+
+### Orta Vade (Q3-Q4 2026)
+
+| # | Feature | Açıklama |
+|---|---------|----------|
+| 5 | **Review Analytics Dashboard** | İstatistikler, trend analizi, en sık hatalar |
+| 6 | **Çoklu IDE Plugin** | VS Code, IntelliJ IDEA, Visual Studio, Neovim |
+| 7 | **Team-based Rules** | Takım bazlı rule set'leri, RBAC |
+| 8 | **Akıllı Caching** | Benzer pattern'ler için cache, incremental review |
+| 9 | **Notification Hub** | Slack, Teams, Email digest entegrasyonları |
+
+### Uzun Vade (2027)
+
+| # | Feature | Açıklama |
+|---|---------|----------|
+| 10 | **Auto-Fix Suggestions** | AI'ın düzeltilmiş kodu PR'a "suggested change" olarak eklemesi |
+| 11 | **Learning from Feedback** | 👍/👎 ile false positive azaltma |
+| 12 | **Complexity Scoring** | Cyclomatic + cognitive complexity metrikleri |
+| 13 | **Multi-tenant SaaS** | Çoklu organizasyon desteği, self-service onboarding |
+
+---
+
+## SLAYT 27: Önerilen Ek Feature'lar
+
+### Gelecekte Eklenebilecek Yüksek Etkili Özellikler
+
+**1. Auto-Fix Suggestion (Otomatik Düzeltme)**
+
+AI sadece sorunu bulmakla kalmaz, düzeltilmiş kodu da üretir ve PR'a "suggested change" olarak ekler:
+
+```diff
+- query = f"SELECT * FROM users WHERE id={user_id}"
++ query = "SELECT * FROM users WHERE id=@user_id"
++ cursor.execute(query, {"user_id": user_id})
+```
+
+Geliştirici tek tıkla düzeltmeyi kabul edebilir. **Fix time %50-80 azalır.**
+
+**2. Code Complexity Scoring**
+
+PR'daki değişikliklerin karmaşıklık metriklerini hesapla:
+
+```markdown
+### 📐 Complexity Analysis
+| Dosya | Cyclomatic | Cognitive | Risk |
+|-------|-----------|-----------|------|
+| auth.py | 15 | 22 | 🔴 High |
+| utils.py | 3 | 4 | 🟢 Low |
+```
+
+**3. Learning from Feedback**
+
+Geliştiricilerin AI yorumlarına tepkisi ile modeli ince ayar:
 
 ```
-📊 4 Platform Desteği    → GitHub, GitLab, Bitbucket, Azure DevOps
-🤖 3 AI Provider         → OpenAI, Anthropic, Groq
-🌐 25+ Programlama Dili  → Otomatik tespit
-📝 19 Rule Dosyası       → AI-generated, dile özel
-🔧 3 MCP Tool            → IDE entegrasyonu
-📦 5 Deployment Yöntemi  → Docker, Podman, Railway, Compose, Manuel
-🧪 5 Test Dosyası        → Unit + Integration
-📋 4 CI/CD Pipeline Örneği → Her platform için hazır config
+👍 Yararlı → Bu pattern'i güçlendir
+👎 Gereksiz → False positive olarak işaretle
+```
+
+Zamanla ekibe özel review kalitesi oluşur. False positive oranı düşer.
+
+---
+
+## SLAYT 28: API Endpoint Referansı
+
+### REST API Endpoint Listesi
+
+| Method | Endpoint | Açıklama |
+|--------|----------|----------|
+| `GET` | `/` | Health check, server durumu |
+| `POST` | `/webhook` | Webhook alım (tüm platformlar) |
+| `GET` | `/mcp/sse` | MCP SSE bağlantısı |
+| `GET` | `/rules` | Rule dosyalarını listele |
+| `GET` | `/rules?language=python` | Dile göre filtreleme |
+| `GET` | `/rules/resolve?focus=security` | Odak alanına göre çözümleme |
+| `GET` | `/rules/{filename}` | Belirli rule içeriği |
+| `GET` | `/templates` | Mevcut template'leri listele |
+| `POST` | `/templates/switch` | Runtime template değiştirme |
+
+### Örnek API Çağrıları
+
+**Health Check:**
+```bash
+curl http://localhost:8000/
+# {"name": "MCP Code Review Server By Mennano", "version": "1.0.0", "status": "healthy"}
+```
+
+**Rule Listeleme:**
+```bash
+curl http://localhost:8000/rules?language=csharp
+# {"count": 4, "rules": ["csharp-compilation.md", "csharp-security.md", ...]}
+```
+
+**Template Değiştirme:**
+```bash
+curl -X POST http://localhost:8000/templates/switch \
+  -H "Content-Type: application/json" \
+  -d '{"name": "detailed"}'
+# {"status": "ok", "active": "detailed"}
 ```
 
 ---
 
-## SLAYT 22: Soru-Cevap
+## SLAYT 29: Metrikler ve Özet
+
+### Projenin Sayısal Büyüklüğü
+
+```
+📊 4   Platform Desteği       → GitHub, GitLab, Bitbucket, Azure DevOps
+🤖 3   AI Provider            → OpenAI (GPT-4), Anthropic (Claude), Groq (Llama 3.3)
+🌐 25+ Programlama Dili       → Otomatik tespit + dile özel kurallar
+📝 18+ Rule Dosyası           → AI-generated, Markdown tabanlı
+📋 4   PR Template            → Default, Detailed, Executive, Custom
+🔧 3   MCP Tool               → review_code, analyze_diff, security_scan
+🔍 7   Focus Area             → compilation, security, performance, bugs, ...
+⚡ 5   Severity Level         → CRITICAL → INFO
+📦 5   Deployment Yöntemi     → Docker, Podman, Compose, Railway, Manuel
+📄 4   CI/CD Pipeline Örneği  → Her platform için hazır YAML
+🔐 7   Güvenlik Katmanı       → İmza doğrulama → HTTPS → Self-hosted
+📁 30+ Python Dosyası         → Modüler mimari
+```
+
+### Değer Önerisi Özeti
+
+| Boyut | Etki |
+|-------|------|
+| **Maliyet** | CodeRabbit'e göre %70-90 tasarruf |
+| **Zaman** | Manuel review süresi %60-80 azalır |
+| **Kalite** | Tutarsız insan review'ı → tutarlı AI review |
+| **Güvenlik** | Self-hosted, veri şirket dışına çıkmaz |
+| **Esneklik** | 4 platform, 3 AI, 25+ dil, 4 template |
+| **Ölçeklenebilirlik** | Container-based, yatay ölçekleme |
+| **Sürdürülebilirlik** | AI ile otomatik kural üretimi, config-driven |
+
+---
+
+## SLAYT 30: Soru-Cevap
 
 ### Sık Sorulan Sorular
 
-**S: Hangi AI provider'ı önerirsiniz?**  
-C: Yüksek hacim + düşük maliyet için Groq (Llama 3.3), detaylı analiz için OpenAI (GPT-4), güvenlik odaklı inceleme için Anthropic (Claude).
+**S: Neden Python kullanıldı?**
+C: AI SDK'larının (OpenAI, Anthropic, Groq) Python-first olması, MCP SDK desteği, zengin platform API kütüphaneleri ve hızlı geliştirme döngüsü nedeniyle. Detay için Slayt 3'e bakınız.
 
-**S: Self-hosted zorunlu mu?**  
-C: Evet, veri gizliliği açısından tavsiye edilen. Railway gibi PaaS çözümleri de kullanılabilir.
+**S: Hangi AI provider'ı önerirsiniz?**
+C: Yüksek hacim + düşük maliyet → **Groq (Llama 3.3)**, karmaşık analiz → **OpenAI (GPT-4o)**, güvenlik odaklı → **Anthropic (Claude 3.5 Sonnet)**.
 
-**S: Review ne kadar sürer?**  
-C: Ortalama 10-30 saniye (diff boyutuna ve AI provider'a bağlı).
+**S: Self-hosted zorunlu mu?**
+C: Zorunlu değil ama tavsiye edilen. Railway gibi PaaS çözümleri de kullanılabilir. Ancak veri gizliliği için self-hosted ideal.
 
-**S: False positive oranı nedir?**  
-C: Rule sistemi ile sürekli iyileştirilmektedir. Dile özel kurallar false positive'i minimize eder.
+**S: Review ne kadar sürer?**
+C: Ortalama **10-30 saniye** (diff boyutu ve AI provider'a bağlı). Groq ile genellikle 5-15 saniye.
 
-**S: Mevcut pipeline'a entegre etmek zor mu?**  
-C: Hayır. Her platform için hazır YAML config'leri var. Tek satır curl komutu ile entegre edilir.
+**S: False positive oranı nedir?**
+C: Rule sistemi ve dile özel kurallar ile sürekli iyileştirilmekte. Short-circuit mekanizması gereksiz uyarıları azaltır.
+
+**S: Mevcut CI/CD pipeline'a entegre etmek zor mu?**
+C: Hayır. Her platform için hazır YAML config var. Pipeline'a tek satır `curl` komutu eklemek yeterli.
+
+**S: Yeni bir programlama dili desteği nasıl eklenir?**
+C: Otomatiktir. İlk kez o dilde bir PR geldiğinde, RuleGenerator AI ile dile özel kuralları oluşturur.
+
+**S: Template nasıl özelleştirilir?**
+C: Config'den hazır template seçilebilir. Tamamen özel format için `custom_templates/` altına markdown dosyası eklenebilir.
+
+**S: Birden fazla repo/proje için tek server yeterli mi?**
+C: Evet. Tek server, webhook URL'i ayarlanan tüm repo'lardan gelen PR'ları işler. Platform farkı yok.
 
 ---
 
-**Hazırlayan:** Mennano Development Team  
-**Versiyon:** 1.0.0  
+**Hazırlayan:** Mennano Development Team
+**Versiyon:** 1.0.0
 **Son Güncelleme:** Şubat 2026
+**İletişim:** [Mennano]

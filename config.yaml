@@ -12,8 +12,8 @@ mcp:
 
 # AI sağlayıcı ve model ayarları
 ai:
-  provider: "openai"  # openai | anthropic | groq
-  model: "gpt-4o-mini"
+  provider: "groq"  # openai | anthropic | groq
+  model: "llama-3.3-70b-versatile"
   # Groq models: llama-3.3-70b-versatile, llama-3.1-70b-versatile, mixtral-8x7b-32768
   # Anthropic: claude-3-5-sonnet-20241022
   # OpenAI: gpt-4-turbo-preview, gpt-4o, gpt-4o-mini
@@ -56,6 +56,11 @@ review:
     - bugs
     - code_quality
     - best_practices
+  # PR yorum template'i — default | detailed | executive | custom
+  template:
+    name: "executive"  # Template adı (default | detailed | executive | custom)
+    # file: "my_team.md"  # Sadece custom template için: custom_templates/ altındaki dosya
+    demo_all: false
 
 # Webhook güvenlik ve timeout ayarları
 webhook:

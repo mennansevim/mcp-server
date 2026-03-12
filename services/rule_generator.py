@@ -5,12 +5,14 @@ Provider-agnostic AI routing is implemented via services/ai_providers/*.
 """
 import structlog
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, TYPE_CHECKING
 from services.ai_providers import AIProviderRouter
+
+if TYPE_CHECKING:
+    from services.rules_service import RulesHelper
 
 logger = structlog.get_logger()
 
-# Rules directory
 RULES_DIR = Path(__file__).parent.parent / "rules"
 
 # Rule kategorileri
@@ -57,8 +59,8 @@ Sadece markdown içeriğini döndür, başka açıklama ekleme."""
         model: Optional[str] = None,
         *,
         ai_config: Optional[dict] = None,
+        rules_helper: Optional["RulesHelper"] = None,
     ):
-        # Backward compatible
         if ai_config is None:
             ai_config = {
                 "provider": provider,
@@ -68,6 +70,7 @@ Sadece markdown içeriğini döndür, başka açıklama ekleme."""
             }
         self.ai_config = ai_config
         self.router = AIProviderRouter(ai_config)
+        self.rules_helper = rules_helper
         self.last_provider_used: Optional[str] = None
         self.last_model_used: Optional[str] = None
 
@@ -77,28 +80,33 @@ Sadece markdown içeriğini döndür, başka açıklama ekleme."""
         )
     
     def _load_base_rule(self, category: str) -> str:
-        """Temel rule dosyasını yükle"""
+        """Temel rule dosyasını Rules API üzerinden yükle (fallback: lokal)"""
         rule_file_map = {
             "security": "security.md",
             "performance": "performance.md",
-            "fundamentals": "dotnet-fundamentals.md",  # Genel fundamentals için
+            "fundamentals": "dotnet-fundamentals.md",
             "compilation": "compilation.md",
             "best-practices": "best-practices.md",
-            "linter": "linter.md",  # Yeni oluşturulacak
+            "linter": "linter.md",
         }
-        
+
         rule_file = rule_file_map.get(category)
         if not rule_file:
             return ""
-        
+
+        if self.rules_helper:
+            content = self.rules_helper.get_rule(rule_file)
+            if content:
+                logger.info("base_rule_loaded", category=category, file=rule_file)
+                return content
+
         rule_path = RULES_DIR / rule_file
         if rule_path.exists():
             try:
-                with open(rule_path, 'r', encoding='utf-8') as f:
-                    return f.read()
+                return rule_path.read_text(encoding="utf-8")
             except Exception as e:
                 logger.warning("failed_to_load_base_rule", category=category, error=str(e))
-        
+
         return ""
     
     async def generate_rule_for_language(
@@ -118,14 +126,18 @@ Sadece markdown içeriğini döndür, başka açıklama ekleme."""
         Returns:
             Başarılı olursa True
         """
-        # Dosya adını oluştur: {language}-{category}.md
         rule_filename = f"{language}-{category}.md"
         rule_path = RULES_DIR / rule_filename
-        
-        # Dosya varsa ve force_regenerate False ise atla
-        if rule_path.exists() and not force_regenerate:
-            logger.info("rule_file_exists", file=rule_filename, language=language, category=category)
-            return True
+
+        if not force_regenerate:
+            if self.rules_helper:
+                content = self.rules_helper.get_rule(rule_filename)
+                if content:
+                    logger.info("rule_file_exists", file=rule_filename)
+                    return True
+            elif rule_path.exists():
+                logger.info("rule_file_exists", file=rule_filename, language=language, category=category)
+                return True
         
         try:
             # Temel rule'u yükle

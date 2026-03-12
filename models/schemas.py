@@ -74,6 +74,10 @@ class ReviewResult(BaseModel):
     # Recommendations
     approval_recommended: bool = True
     block_merge: bool = False
+
+    # AI Slop detection
+    ai_slop_detected: bool = False
+    ai_slop_count: int = 0
     
     def __init__(self, **data):
         super().__init__(**data)
@@ -84,6 +88,9 @@ class ReviewResult(BaseModel):
         self.medium_count = sum(1 for i in self.issues if i.severity == IssueSeverity.MEDIUM)
         self.low_count = sum(1 for i in self.issues if i.severity == IssueSeverity.LOW)
         self.info_count = sum(1 for i in self.issues if i.severity == IssueSeverity.INFO)
+        # AI Slop auto-calculate
+        self.ai_slop_count = sum(1 for i in self.issues if i.category == "ai_slop")
+        self.ai_slop_detected = self.ai_slop_count > 0
 
 
 class ReviewRequest(BaseModel):

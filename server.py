@@ -34,9 +34,8 @@ from models import Platform, ReviewRequest
 from webhook import WebhookHandler
 from services import AIReviewer, DiffAnalyzer, CommentService
 from tools import ReviewTools
-from services.rules_service import list_rule_files, get_rule_content, resolve_rules
-from services.live_log_store import LiveLogStore
-from services.ui_logs_config import parse_ui_logs_config
+from services.rules_service import RulesHelper
+
 
 # Load environment variables
 load_dotenv()
@@ -155,15 +154,17 @@ class CodeReviewServer:
         self.config = config
         self.webhook_handler = WebhookHandler()
         
-        # Initialize AI reviewer
         ai_config = config["ai"]
-        # Provider-agnostic / multi-provider aware
+        self.rules_helper = RulesHelper()
         self.ai_reviewer = AIReviewer(ai_config=ai_config)
         
         self.diff_analyzer = DiffAnalyzer()
-        self.comment_service = CommentService()
+      
         self.ui_logs_config = parse_ui_logs_config(self.config)
         self.live_logs = LiveLogStore(max_events_per_run=self.ui_logs_config.max_events_per_poll)
+        template_config = config.get("review", {}).get("template")
+        self.comment_service = CommentService(template_config=template_config)
+
         
         # Initialize platform adapters
         self.adapters = {}
@@ -522,6 +523,8 @@ async def lifespan(app: FastAPI):
         print(f"🧠 Model: {ai_cfg.get('model')}")
     print(f"🔌 Platforms: {', '.join([p.value for p in review_server.adapters.keys()])}")
     print(f"💬 Comment Strategy: {config['review']['comment_strategy']}")
+    tmpl_name = config.get("review", {}).get("template", {}).get("name", "default")
+    print(f"📄 Review Template: {tmpl_name}")
     print(f"🔍 Focus Areas: {', '.join(config['review']['focus'])}")
     print("="*80)
     print("✅ Server ready to receive webhooks!")
@@ -586,42 +589,57 @@ async def root():
 
 @app.get("/rules")
 async def rules_index(language: str | None = None, category: str | None = None):
-    """
-    List available rule markdown files.
-    Optional filters:
-      - language: python/csharp/...
-      - category: security/performance/...
-    """
-    items = list_rule_files()
-    if language:
-        items = [x for x in items if (x.get("language") or "").lower() == language.lower()]
-    if category:
-        items = [x for x in items if (x.get("category") or "").lower() == category.lower()]
+    """List available rule files."""
+    items = review_server.rules_helper.list_rules(language=language, category=category)
     return {"count": len(items), "rules": items}
 
 
 @app.get("/rules/resolve")
 async def rules_resolve(focus: list[str] = Query(default=[]), language: str | None = None):
-    """
-    Resolve which rules apply for focus areas + optional language.
-    Example:
-      /rules/resolve?focus=security&focus=performance&language=python
-    """
-    try:
-        return resolve_rules(focus_areas=focus, language=language)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    """Resolve which rules apply for focus areas + optional language."""
+    return review_server.rules_helper.resolve_rules(focus_areas=focus, language=language)
 
 
 @app.get("/rules/{filename}")
 async def rules_get(filename: str):
-    """Fetch a specific rule file content by filename (e.g. security.md)."""
-    try:
-        return {"filename": filename, "content": get_rule_content(filename)}
-    except FileNotFoundError:
+    """Fetch a specific rule file content."""
+    content = review_server.rules_helper.get_rule(filename)
+    if content is None:
         raise HTTPException(status_code=404, detail="Rule not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return {"filename": filename, "content": content}
+
+
+@app.get("/templates")
+async def list_templates():
+    """List available review templates and current selection."""
+    from review_templates import BUILTIN_TEMPLATES
+    from pathlib import Path
+
+    custom_dir = Path("custom_templates")
+    custom_files = [f.name for f in custom_dir.glob("*.md")] if custom_dir.exists() else []
+
+    return {
+        "active": review_server.comment_service.template.name,
+        "builtin": [
+            {"name": t.name, "description": t.description}
+            for t in (cls() for cls in BUILTIN_TEMPLATES.values())
+        ],
+        "custom_files": custom_files,
+    }
+
+
+@app.post("/templates/switch")
+async def switch_template(body: dict):
+    """
+    Switch the active review template at runtime.
+    Body: {"name": "detailed"} or {"name": "custom", "file": "my_team.md"}
+    """
+    from review_templates import get_template
+
+    new_tmpl = get_template(body)
+    review_server.comment_service.template = new_tmpl
+    logger.info("template_switched", name=new_tmpl.name)
+    return {"status": "ok", "active": new_tmpl.name}
 
 
 @app.get("/api/logs/config")

@@ -4,21 +4,17 @@ AI-powered code review (provider-agnostic).
 Supports Groq/OpenAI/Anthropic and is designed to be extended with new providers
 via services/ai_providers/*.
 """
-import os
 import json
 import structlog
-from pathlib import Path
 from typing import List, Optional, Dict
 
 from models import ReviewResult, ReviewIssue, IssueSeverity
 from services.language_detector import LanguageDetector
 from services.rule_generator import RuleGenerator, RULE_CATEGORIES
+from services.rules_service import RulesHelper
 from services.ai_providers import AIProviderRouter, AIProviderError
 
 logger = structlog.get_logger()
-
-# Rules directory
-RULES_DIR = Path(__file__).parent.parent / "rules"
 
 
 class AIReviewer:
@@ -108,6 +104,19 @@ Files changed:
    - Performance issues
    - Maintainability concerns
 
+5. **AI SLOP DETECTION** — Identify low-quality AI-generated code patterns:
+   - 🤖 **Obvious/redundant comments**: Comments that just restate the code (e.g., `// Initialize the variable`, `// Return the result`, `// Import the module`, `// Loop through items`)
+   - 🤖 **Generic placeholder names**: Variables like `data`, `result`, `temp`, `item`, `value`, `obj`, `thing` used without meaningful context
+   - 🤖 **Boilerplate bloat**: Overly verbose code that could be expressed more concisely (e.g., unnecessary null checks already handled by the framework, manually implementing what a one-liner library call does)
+   - 🤖 **Copy-paste patterns**: Repetitive blocks with minimal variation that should be refactored into a loop or helper function
+   - 🤖 **Catch-all exception handling**: Generic `catch (Exception e)` / `except Exception` without specific handling or meaningful recovery
+   - 🤖 **Hallucinated APIs**: Using methods, properties, or classes that don't exist in the framework/library version
+   - 🤖 **TODO/FIXME placeholders left by AI**: Comments like `// TODO: implement this`, `// Add error handling here` left as unfinished scaffolding
+   - 🤖 **Inconsistent patterns**: Mixing different coding styles in the same file (e.g., callbacks and async/await, var and explicit types)
+   
+   For each AI slop issue, use category: "ai_slop" and severity: "medium" or "low".
+   **AI Slop issues must NEVER be "critical" or "high" — they are informational quality warnings, NOT merge blockers.**
+
 **MANDATORY RULES - NO EXCEPTIONS:**
 - If you see ANY missing keyword (`await`, `var`, `let`, `const`, `$`, `fn`, `func`, `def`, etc.) → **CRITICAL, block_merge=true**
 - If you see ANY type mismatch (e.g., `string? = 1`, `int = "test"`, `const count: number = "test"`) → **CRITICAL, block_merge=true**
@@ -116,12 +125,19 @@ Files changed:
 - If code won't compile/run → **ALWAYS mark as CRITICAL and block_merge=true**
 - **CHECK EVERY LINE OF THE DIFF - NO DETAIL IS TOO SMALL**
 
+**⚠️ SHORT-CIRCUIT RULE:**
+If you find ANY compilation or syntax error (code won't compile/run), STOP immediately.
+Do NOT check security, performance, code quality, or any other category.
+Only report the compilation/syntax errors and nothing else.
+Rationale: if code cannot compile, all other checks are meaningless.
+
 **If code has compilation/syntax errors or will break the build, mark as CRITICAL and set block_merge=true.**
 
 Provide your review in JSON format:
 {{
     "summary": "DETAILED summary - MUST explicitly state if code won't compile/run. List ALL compilation errors found. If there are CRITICAL errors, start with '🚨 CRITICAL ERRORS FOUND:' and list them clearly.",
     "score": 3,
+    "ai_slop_detected": true,
     "issues": [
         {{
             "severity": "critical",
@@ -132,6 +148,16 @@ Provide your review in JSON format:
             "code_snippet": "writer.WriteLineAsync(JsonSerializer.Serialize(error));",
             "suggestion": "Add 'await' keyword: await writer.WriteLineAsync(JsonSerializer.Serialize(error));",
             "category": "compilation"
+        }},
+        {{
+            "severity": "medium",
+            "title": "AI Slop: Redundant comments restating the code",
+            "description": "Multiple comments simply restate what the code does (e.g., '// Initialize the list') instead of explaining why. This is a hallmark of AI-generated code that wasn't reviewed.",
+            "file_path": "path/to/file.cs",
+            "line_number": 15,
+            "code_snippet": "// Initialize the list\nvar list = new List<string>();",
+            "suggestion": "Remove obvious comments or replace them with comments explaining the business logic and intent.",
+            "category": "ai_slop"
         }}
     ],
     "approval_recommended": false,
@@ -160,13 +186,12 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
           AIReviewer(provider="groq", model="...") still works.
 
         Recommended:
-          AIReviewer(ai_config=config["ai"])  # supports modular provider selection
+          AIReviewer(ai_config=config["ai"])
         """
         if ai_config is None:
             ai_config = {
                 "provider": provider,
                 "model": model,
-                # keep legacy defaults consistent with config.yaml
                 "temperature": 0.3,
                 "max_tokens": 4096,
             }
@@ -176,8 +201,8 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
         self.last_provider_used: Optional[str] = None
         self.last_model_used: Optional[str] = None
 
-        # Rule generator uses same config by default
-        self.rule_generator = RuleGenerator(ai_config=ai_config)
+        self.rules_helper = RulesHelper()
+        self.rule_generator = RuleGenerator(ai_config=ai_config, rules_helper=self.rules_helper)
 
         logger.info(
             "ai_reviewer_initialized",
@@ -185,65 +210,17 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
         )
     
     def _load_rules(self, focus_areas: List[str], language: Optional[str] = None) -> str:
-        """
-        Load relevant rules based on focus areas and detected language
-        
-        Args:
-            focus_areas: Areas to focus on (security, performance, etc.)
-            language: Detected programming language (python, csharp, etc.)
-        """
-        rules_content = []
-        loaded_files = set()
-        
-        # Eğer dil tespit edildiyse, dile özel rule dosyalarını yükle
-        if language:
-            for area in focus_areas:
-                # Kategori adını normalize et
-                category = area.lower().replace('_', '-')
-                
-                # Eğer kategori RULE_CATEGORIES'de yoksa, eski mapping'i kullan
-                if category not in RULE_CATEGORIES:
-                    # Eski mapping'den kategori adını çıkar
-                    rule_file = self.RULE_FILES.get(area.lower(), '')
-                    if rule_file:
-                        category = rule_file.replace('.md', '')
-                    else:
-                        # Mapping bulunamazsa, area'yı direkt kategori olarak kullan
-                        category = area.lower().replace('_', '-')
-                
-                # Dile özel rule dosyası: {language}-{category}.md
-                rule_filename = f"{language}-{category}.md"
-                rule_path = RULES_DIR / rule_filename
-                
-                if rule_path.exists():
-                    try:
-                        with open(rule_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            rules_content.append(f"\n## Rules for {language.upper()}: {area.upper()}\n{content}")
-                            loaded_files.add(rule_filename)
-                            logger.info("loaded_language_specific_rules", language=language, area=area, file=rule_filename)
-                    except Exception as e:
-                        logger.warning("failed_to_load_language_rules", language=language, area=area, error=str(e))
-        
-        # Dile özel rule bulunamadıysa veya dil tespit edilmediyse, genel rule'ları yükle
-        if not rules_content:
-            for area in focus_areas:
-                rule_file = self.RULE_FILES.get(area.lower())
-                if rule_file and rule_file not in loaded_files:
-                    rule_path = RULES_DIR / rule_file
-                    if rule_path.exists():
-                        try:
-                            with open(rule_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                                rules_content.append(f"\n## Rules for: {area.upper()}\n{content}")
-                                loaded_files.add(rule_file)
-                                logger.info("loaded_rules", area=area, file=rule_file)
-                        except Exception as e:
-                            logger.warning("failed_to_load_rules", area=area, error=str(e))
-        
-        if rules_content:
-            return "\n\n".join(rules_content)
-        return ""
+        """Load relevant rules from local rule files."""
+        result = self.rules_helper.resolve_rules(focus_areas, language=language)
+        content = result.get("content", "")
+        files = result.get("files", [])
+
+        if files:
+            logger.info("rules_loaded", files=files, language=language)
+        else:
+            logger.info("no_rules_resolved", focus_areas=focus_areas, language=language)
+
+        return content
     
     async def review(
         self,
@@ -347,6 +324,10 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                         }
                         issue["severity"] = severity_map.get(severity_lower, severity_lower)
                 
+                # AI Slop issues must never block merge — cap at medium
+                if issue.get("category") == "ai_slop" and issue.get("severity") in ("critical", "high"):
+                    issue["severity"] = "medium"
+
                 # Ensure critical issues have detailed descriptions
                 if issue.get("severity") == "critical":
                     desc = issue.get("description", "")
@@ -358,18 +339,28 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                 
                 normalized_issues.append(issue)
             
-            # Enhance summary if critical issues found
+            # Short-circuit: if compilation/syntax errors exist, drop everything else
+            compilation_issues = [
+                i for i in normalized_issues
+                if i.get("severity") == "critical"
+                and i.get("category", "").lower() in ("compilation", "syntax")
+            ]
+            if compilation_issues:
+                normalized_issues = compilation_issues
+                logger.info("short_circuit_compilation", kept=len(compilation_issues))
+
             summary = review_data.get("summary", "AI review completed")
-            critical_issues = [issue for issue in normalized_issues if issue.get("severity") == "critical"]
-            
+            critical_issues = [i for i in normalized_issues if i.get("severity") == "critical"]
+
             if critical_issues:
-                # Prepend critical issues summary
                 critical_summary = f"🚨 CRITICAL ERRORS FOUND ({len(critical_issues)}):\n"
                 for idx, issue in enumerate(critical_issues, 1):
                     critical_summary += f"{idx}. {issue.get('title', 'Unknown issue')} - {issue.get('description', '')[:100]}...\n"
                 summary = critical_summary + "\n" + summary
-            
-            # Convert to ReviewResult
+
+            ai_slop_from_response = review_data.get("ai_slop_detected", False)
+            ai_slop_issues = [i for i in normalized_issues if i.get("category") == "ai_slop"]
+
             result = ReviewResult(
                 summary=summary,
                 score=review_data.get("score", 7),
@@ -378,7 +369,8 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                     for issue in normalized_issues
                 ],
                 approval_recommended=review_data.get("approval_recommended", True),
-                block_merge=review_data.get("block_merge", False) or len(critical_issues) > 0
+                block_merge=review_data.get("block_merge", False) or len(critical_issues) > 0,
+                ai_slop_detected=ai_slop_from_response or len(ai_slop_issues) > 0,
             )
             
             logger.info(
