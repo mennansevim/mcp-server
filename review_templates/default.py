@@ -36,9 +36,16 @@ class DefaultTemplate(BaseTemplate):
             "",
         ]
 
+        badges = []
+        if result.security_issues_count > 0:
+            sec_color = "red" if result.security_score <= 4 else "orange" if result.security_score <= 7 else "brightgreen"
+            badges.append(_badge("Security", f"{result.security_score}/10", sec_color))
+        if result.secret_leak_detected:
+            badges.append(_badge("Secret Leak", "DETECTED", "red"))
         if result.ai_slop_detected:
-            slop_badge = _badge("AI Slop", f"{result.ai_slop_count} detected", "ff6723")
-            lines.extend([slop_badge, ""])
+            badges.append(_badge("AI Slop", f"{result.ai_slop_count} detected", "ff6723"))
+        if badges:
+            lines.extend([" ".join(badges), ""])
 
         if result.total_issues > 0:
             lines.extend(["### 📊 Issues Found", f"- Total: **{result.total_issues}**"])
@@ -73,6 +80,39 @@ class DefaultTemplate(BaseTemplate):
                 ])
                 if issue.suggestion:
                     lines.extend(["**Suggestion:**", f"> {issue.suggestion}", ""])
+
+        sec_issues = [i for i in result.issues if i.category == "security"]
+        if sec_issues:
+            lines.extend(["### 🔒 Security Deep Scan", ""])
+            if result.owasp_categories_hit:
+                lines.append(f"OWASP hit: {', '.join(result.owasp_categories_hit)}")
+                lines.append("")
+            for issue in sec_issues[:8]:
+                emoji = SEVERITY_EMOJI[issue.severity]
+                loc = ""
+                if issue.file_path:
+                    loc = f"`{issue.file_path}`"
+                    if issue.line_number:
+                        loc += f":{issue.line_number}"
+                tag_parts = []
+                if issue.owasp_id:
+                    tag_parts.append(f"OWASP {issue.owasp_id}")
+                if issue.cwe_id:
+                    tag_parts.append(issue.cwe_id)
+                if issue.threat_type:
+                    tag_parts.append(issue.threat_type)
+                tag = " • ".join(tag_parts) if tag_parts else "security"
+                lines.extend([
+                    f"#### {emoji} {issue.title}",
+                    f"📍 {loc} • {tag}" if loc else f"📍 {tag}",
+                    "",
+                    issue.description,
+                    "",
+                ])
+                if issue.code_snippet:
+                    lines.extend(["**Vulnerable code:**", "```", issue.code_snippet, "```", ""])
+                if issue.suggestion:
+                    lines.extend(["**Fix:**", f"> {issue.suggestion}", ""])
 
         slop_issues = [i for i in result.issues if i.category == "ai_slop"]
         if slop_issues:

@@ -43,6 +43,8 @@ export interface RunEventsResponse {
   next_cursor: number
 }
 
+export type ReviewTemplate = 'default' | 'detailed' | 'executive'
+
 export interface EditableConfig {
   ui: {
     logs: {
@@ -52,6 +54,7 @@ export interface EditableConfig {
   }
   review: {
     comment_strategy: 'summary' | 'inline' | 'both'
+    template: ReviewTemplate
     focus: string[]
   }
   ai: {

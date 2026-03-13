@@ -20,6 +20,17 @@ SEVERITY_EMOJI = {
 
 CATEGORY_TYPE_MAP = {
     "security": "Security",
+    "injection": "Security",
+    "broken_auth": "Security",
+    "sensitive_data": "Security",
+    "xxe": "Security",
+    "broken_access": "Security",
+    "misconfig": "Security",
+    "xss": "Security",
+    "deserialization": "Security",
+    "vulnerable_deps": "Security",
+    "insufficient_logging": "Security",
+    "secret_leak": "Security",
     "bugs": "Reliability",
     "bug": "Reliability",
     "performance": "Reliability",

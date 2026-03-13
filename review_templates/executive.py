@@ -89,8 +89,10 @@ class ExecutiveTemplate(BaseTemplate):
         debt_hours = _estimate_debt_hours(result)
         sc = _score_color(result.score)
 
+        sec_color = "red" if result.security_score <= 4 else "orange" if result.security_score <= 7 else "brightgreen"
         badge_list = [
             _badge("Quality", f"{result.score}/10", sc),
+            _badge("Security", f"{result.security_score}/10", sec_color),
             _badge("Risk", risk_label, risk_color),
             _badge("Issues", str(result.total_issues), "blue"),
             _badge("Tech Debt", f"+{debt_hours}h", "blueviolet"),
@@ -98,6 +100,8 @@ class ExecutiveTemplate(BaseTemplate):
                    "BLOCK" if result.block_merge else "OK" if result.approval_recommended else "REVIEW",
                    "red" if result.block_merge else "brightgreen" if result.approval_recommended else "orange"),
         ]
+        if result.secret_leak_detected:
+            badge_list.append(_badge("Secret Leak", "DETECTED", "red"))
         if result.ai_slop_detected:
             badge_list.append(_badge("AI Slop", f"{result.ai_slop_count} detected", "ff6723"))
         badges = " ".join(badge_list)

@@ -94,10 +94,63 @@ Files changed:
    - Are there edge cases not handled?
    - Could this cause runtime errors?
 
-3. **SECURITY VULNERABILITIES**:
-   - SQL injection, XSS, CSRF risks
-   - Exposed secrets or credentials
-   - Unsafe deserialization
+3. **SECURITY DEEP SCAN** — Perform a thorough security analysis using OWASP Top 10 framework:
+   
+   **A1 — Injection** (SQL, NoSQL, OS command, LDAP injection):
+   - String concatenation/interpolation in queries → CRITICAL
+   - User input passed to system commands → CRITICAL
+   - Template injection (SSTI) → HIGH
+   
+   **A2 — Broken Authentication**:
+   - Hardcoded credentials, weak password policies → CRITICAL
+   - Missing brute-force protection → HIGH
+   - Session fixation vulnerabilities → HIGH
+   
+   **A3 — Sensitive Data Exposure**:
+   - PII/credentials logged or returned in responses → CRITICAL
+   - Missing encryption for sensitive data at rest/transit → HIGH
+   - Overly verbose error messages exposing internals → MEDIUM
+   
+   **A4 — XML External Entities (XXE)**:
+   - XML parsing without disabling external entities → HIGH
+   
+   **A5 — Broken Access Control**:
+   - Missing authorization checks on endpoints → HIGH
+   - IDOR (Insecure Direct Object Reference) → HIGH
+   - Path traversal vulnerabilities → CRITICAL
+   
+   **A6 — Security Misconfiguration**:
+   - Debug mode enabled in production config → HIGH
+   - Default credentials or accounts → CRITICAL
+   - CORS wildcard (*) on sensitive endpoints → MEDIUM
+   
+   **A7 — Cross-Site Scripting (XSS)**:
+   - innerHTML with unsanitized input → HIGH
+   - Reflected/stored XSS patterns → HIGH
+   
+   **A8 — Insecure Deserialization**:
+   - BinaryFormatter, pickle, eval() on untrusted data → CRITICAL
+   - JSON deserialization without type validation → MEDIUM
+   
+   **A9 — Known Vulnerable Components**:
+   - Deprecated/insecure library usage patterns → MEDIUM
+   - Known insecure function calls (e.g., MD5 for hashing) → HIGH
+   
+   **A10 — Insufficient Logging**:
+   - Security events not logged (login failures, access denied) → LOW
+   - Missing audit trail for sensitive operations → MEDIUM
+   
+   **SECRET LEAK DETECTION** — Scan for exposed secrets in code:
+   - API keys, tokens, passwords in source code → CRITICAL
+   - Connection strings with embedded credentials → CRITICAL
+   - Private keys, certificates in repository → CRITICAL
+   - Patterns: password=, api_key, api-key, secret, token, bearer, AWS/GCP/Azure key formats
+   
+   For each security issue, include:
+   - `category`: "security"
+   - `threat_type`: one of "injection", "broken_auth", "sensitive_data", "xxe", "broken_access", "misconfig", "xss", "deserialization", "vulnerable_deps", "insufficient_logging", "secret_leak"
+   - `owasp_id`: e.g. "A1", "A2", ... "A10"
+   - `cwe_id`: if known (e.g. "CWE-89" for SQL injection)
 
 4. **CODE QUALITY**:
    - Best practices violated
@@ -138,21 +191,35 @@ Provide your review in JSON format:
     "summary": "DETAILED summary - MUST explicitly state if code won't compile/run. List ALL compilation errors found. If there are CRITICAL errors, start with '🚨 CRITICAL ERRORS FOUND:' and list them clearly.",
     "score": 3,
     "ai_slop_detected": true,
+    "security_score": 4,
     "issues": [
         {{
             "severity": "critical",
             "title": "CRITICAL: Missing await keyword",
-            "description": "DETAILED explanation: The code calls an async method without 'await' keyword. This will cause compilation error in C# because async methods return Task and must be awaited. Line X shows: 'writer.WriteLineAsync(...)' but should be 'await writer.WriteLineAsync(...)'. IMPACT: Code will NOT compile.",
+            "description": "DETAILED explanation ...",
             "file_path": "path/to/file.cs",
             "line_number": 42,
             "code_snippet": "writer.WriteLineAsync(JsonSerializer.Serialize(error));",
-            "suggestion": "Add 'await' keyword: await writer.WriteLineAsync(JsonSerializer.Serialize(error));",
+            "suggestion": "Add 'await' keyword: await writer.WriteLineAsync(...);",
             "category": "compilation"
+        }},
+        {{
+            "severity": "critical",
+            "title": "SQL Injection: User input in raw query",
+            "description": "User-supplied 'username' is interpolated directly into SQL query string, enabling SQL injection attacks.",
+            "file_path": "path/to/repo.cs",
+            "line_number": 28,
+            "code_snippet": "var q = $\"SELECT * FROM Users WHERE name='{{username}}'\";",
+            "suggestion": "Use parameterized queries: db.Query(\"SELECT * FROM Users WHERE name=@n\", new {{ n = username }});",
+            "category": "security",
+            "threat_type": "injection",
+            "owasp_id": "A1",
+            "cwe_id": "CWE-89"
         }},
         {{
             "severity": "medium",
             "title": "AI Slop: Redundant comments restating the code",
-            "description": "Multiple comments simply restate what the code does (e.g., '// Initialize the list') instead of explaining why. This is a hallmark of AI-generated code that wasn't reviewed.",
+            "description": "Multiple comments simply restate what the code does instead of explaining why.",
             "file_path": "path/to/file.cs",
             "line_number": 15,
             "code_snippet": "// Initialize the list\nvar list = new List<string>();",
@@ -361,13 +428,20 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
             ai_slop_from_response = review_data.get("ai_slop_detected", False)
             ai_slop_issues = [i for i in normalized_issues if i.get("category") == "ai_slop"]
 
+            # Strip unknown fields before creating ReviewIssue
+            known_issue_fields = {
+                "severity", "title", "description", "file_path", "line_number",
+                "line_end", "code_snippet", "suggestion", "category",
+                "owasp_id", "cwe_id", "threat_type",
+            }
+            clean_issues = []
+            for issue in normalized_issues:
+                clean_issues.append({k: v for k, v in issue.items() if k in known_issue_fields})
+
             result = ReviewResult(
                 summary=summary,
                 score=review_data.get("score", 7),
-                issues=[
-                    ReviewIssue(**issue)
-                    for issue in normalized_issues
-                ],
+                issues=[ReviewIssue(**issue) for issue in clean_issues],
                 approval_recommended=review_data.get("approval_recommended", True),
                 block_merge=review_data.get("block_merge", False) or len(critical_issues) > 0,
                 ai_slop_detected=ai_slop_from_response or len(ai_slop_issues) > 0,
@@ -377,7 +451,9 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                 "review_completed",
                 total_issues=result.total_issues,
                 critical=result.critical_count,
-                score=result.score
+                security_score=result.security_score,
+                security_issues=result.security_issues_count,
+                score=result.score,
             )
             
             return result

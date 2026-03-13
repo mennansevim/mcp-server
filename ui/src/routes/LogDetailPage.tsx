@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { getLogsConfig, getRunEvents } from '../lib/api'
 import { usePolling } from '../lib/usePolling'
 import type { LiveEvent, LiveRunSummary } from '../types/logs'
@@ -198,54 +198,53 @@ export default function LogDetailPage() {
   usePolling(loadEvents, pollMs, Boolean(runId))
 
   return (
-    <main className="page">
-      <header className="panel">
-        <h1>Run Detail</h1>
-        <p>
-          <Link to="/logs">Back to dashboard</Link>
-        </p>
-        <p>
-          <Link to="/config">Open config</Link>
-        </p>
-        <p>Run ID: {runId}</p>
+    <>
+      <div className="page-header">
+        <div>
+          <h1>Run Detail</h1>
+          <p className="page-subtitle">Run ID: {runId}</p>
+        </div>
+      </div>
 
-        {run ? (
-          <section className="run-summary">
-            <strong>
-              PR #{run.pr_id} - {run.title}
-            </strong>
-            <p>
-              Status: {run.status}
-              {run.score != null ? ` | Score: ${run.score}/10` : ''}
-              {run.issues != null ? ` | Issues: ${run.issues}` : ''}
-            </p>
-          </section>
-        ) : null}
+      {run && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <strong style={{ fontSize: 16 }}>PR #{run.pr_id} &mdash; {run.title}</strong>
+            <span className={`badge badge-${run.status === 'active' ? 'active' : run.status === 'error' ? 'error' : 'completed'}`}>
+              {run.status}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, color: 'var(--text-muted)' }}>
+            {run.score != null && <span>Score: <strong>{run.score}/10</strong></span>}
+            {run.issues != null && <span>Issues: <strong>{run.issues}</strong></span>}
+            <span>Author: <strong>{run.author}</strong></span>
+          </div>
+        </div>
+      )}
 
-        {error ? <p className="error-text">{error}</p> : null}
+      {error && <div className="alert alert-error">{error}</div>}
 
-        <ul className="timeline">
-          {groupedEvents.map((group) => (
-            <li
-              className={`timeline-event group-card status-${group.status}`}
-              data-testid={`group-card-${group.id}`}
-              key={group.id}
-            >
-              <div className="timeline-head">
-                <strong>{group.title}</strong>
-                <span>{formatTime(group.ts)}</span>
-              </div>
-              <ul className="group-lines">
-                {group.events.map((event) => (
-                  <li key={event.seq}>{event.message}</li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
+      <div className="timeline-container">
+        {groupedEvents.map((group) => (
+          <div
+            className={`timeline-card status-${group.status}`}
+            data-testid={`group-card-${group.id}`}
+            key={group.id}
+          >
+            <div className="timeline-head">
+              <strong>{group.title}</strong>
+              <span>{formatTime(group.ts)}</span>
+            </div>
+            <ul className="group-lines">
+              {group.events.map((event) => (
+                <li key={event.seq}>{event.message}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
 
-        {events.length === 0 && !error ? <p>Waiting for events...</p> : null}
-      </header>
-    </main>
+      {events.length === 0 && !error && <div className="empty-state">Waiting for events...</div>}
+    </>
   )
 }

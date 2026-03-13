@@ -33,8 +33,11 @@ except ImportError:
 from models import Platform, ReviewRequest
 from webhook import WebhookHandler
 from services import AIReviewer, DiffAnalyzer, CommentService
-from tools import ReviewTools
 from services.rules_service import RulesHelper
+from services.live_log_store import LiveLogStore
+from services.ui_logs_config import parse_ui_logs_config
+from services.analytics_store import AnalyticsStore
+from tools import ReviewTools
 
 
 # Load environment variables
@@ -50,6 +53,7 @@ structlog.configure(
 logger = structlog.get_logger()
 
 ALLOWED_COMMENT_STRATEGIES = {"summary", "inline", "both"}
+ALLOWED_TEMPLATES = {"default", "detailed", "executive"}
 AI_PROVIDER_MODELS: dict[str, list[str]] = {
     "openai": ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo-preview"],
     "anthropic": ["claude-3-5-sonnet-20241022"],
@@ -119,6 +123,11 @@ def extract_editable_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     if model not in AI_PROVIDER_MODELS[provider]:
         model = AI_PROVIDER_MODELS[provider][0]
 
+    template_cfg = review_cfg.get("template") or {}
+    template_name = template_cfg.get("name", "default") if isinstance(template_cfg, dict) else "default"
+    if template_name not in ALLOWED_TEMPLATES:
+        template_name = "default"
+
     return {
         "ui": {
             "logs": {
@@ -128,6 +137,7 @@ def extract_editable_config(raw_config: dict[str, Any]) -> dict[str, Any]:
         },
         "review": {
             "comment_strategy": review_cfg.get("comment_strategy", "summary"),
+            "template": template_name,
             "focus": list(review_cfg.get("focus") or []),
         },
         "ai": {
@@ -159,6 +169,7 @@ class CodeReviewServer:
         self.ai_reviewer = AIReviewer(ai_config=ai_config)
         
         self.diff_analyzer = DiffAnalyzer()
+        self.analytics = AnalyticsStore()
       
         self.ui_logs_config = parse_ui_logs_config(self.config)
         self.live_logs = LiveLogStore(max_events_per_run=self.ui_logs_config.max_events_per_poll)
@@ -183,6 +194,8 @@ class CodeReviewServer:
         self.live_logs.set_max_events_per_run(self.ui_logs_config.max_events_per_poll)
         self.ai_reviewer = AIReviewer(ai_config=self.config.get("ai", {}))
         self.review_tools = ReviewTools(self.ai_reviewer, self.diff_analyzer)
+        template_config = self.config.get("review", {}).get("template")
+        self.comment_service = CommentService(template_config=template_config)
         return extract_editable_config(self.config)
     
     def _init_adapters(self):
@@ -475,6 +488,13 @@ class CodeReviewServer:
                 issues=review_result.total_issues,
                 critical=review_result.critical_count,
             )
+            self.analytics.record_review(
+                review_result,
+                pr_id=str(pr_data.pr_id),
+                repo=pr_data.repo_full_name,
+                author=pr_data.author,
+                platform=pr_data.platform.value,
+            )
 
             return {
                 "status": "success",
@@ -678,6 +698,12 @@ async def put_config(payload: dict[str, Any]):
                 raise HTTPException(status_code=400, detail="Invalid comment strategy")
             merged["review"]["comment_strategy"] = strategy
 
+        if "template" in payload_review:
+            tmpl = str(payload_review["template"]).lower()
+            if tmpl not in ALLOWED_TEMPLATES:
+                raise HTTPException(status_code=400, detail=f"Invalid template. Allowed: {', '.join(sorted(ALLOWED_TEMPLATES))}")
+            merged["review"]["template"] = tmpl
+
         if "focus" in payload_review:
             focus = payload_review["focus"]
             if not isinstance(focus, list) or not all(isinstance(item, str) for item in focus):
@@ -716,6 +742,7 @@ async def put_config(payload: dict[str, Any]):
     new_runtime_config.setdefault("review", {})
     new_runtime_config["review"]["comment_strategy"] = merged["review"]["comment_strategy"]
     new_runtime_config["review"]["focus"] = merged["review"]["focus"]
+    new_runtime_config["review"]["template"] = {"name": merged["review"]["template"]}
     new_runtime_config.setdefault("ai", {})
     new_runtime_config["ai"]["provider"] = merged["ai"]["provider"]
     new_runtime_config["ai"]["model"] = merged["ai"]["model"]
@@ -754,8 +781,8 @@ async def logs_runs():
     return {"count": len(runs), "runs": runs}
 
 
-@app.get("/api/logs/active/{run_id}/events")
-async def logs_active_events(run_id: str, cursor: int = 0, limit: int = 200):
+@app.get("/api/logs/runs/{run_id}/events")
+async def logs_run_events(run_id: str, cursor: int = 0, limit: int = 200):
     try:
         run, events, next_cursor = review_server.live_logs.get_events_since(
             run_id,
@@ -769,6 +796,36 @@ async def logs_active_events(run_id: str, cursor: int = 0, limit: int = 200):
         }
     except KeyError:
         raise HTTPException(status_code=404, detail="Run not found")
+
+
+@app.get("/api/analytics/overview")
+async def analytics_overview():
+    return review_server.analytics.get_overview()
+
+
+@app.get("/api/analytics/trend")
+async def analytics_trend(limit: int = 50):
+    return {"trend": review_server.analytics.get_score_trend(limit)}
+
+
+@app.get("/api/analytics/top-issues")
+async def analytics_top_issues(limit: int = 10):
+    return {"top_issues": review_server.analytics.get_top_issues(limit)}
+
+
+@app.get("/api/analytics/security")
+async def analytics_security():
+    return review_server.analytics.get_security_breakdown()
+
+
+@app.get("/api/analytics/authors")
+async def analytics_authors(limit: int = 20):
+    return {"authors": review_server.analytics.get_author_stats(limit)}
+
+
+@app.get("/api/analytics/recent")
+async def analytics_recent(limit: int = 20):
+    return {"reviews": review_server.analytics.get_recent_reviews(limit)}
 
 
 @app.post("/webhook")

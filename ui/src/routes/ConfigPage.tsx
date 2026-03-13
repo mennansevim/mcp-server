@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { getEditableConfig, updateEditableConfig } from '../lib/api'
-import type { EditableConfig } from '../types/logs'
+import type { EditableConfig, ReviewTemplate } from '../types/logs'
 
 const AI_MODEL_OPTIONS: Record<EditableConfig['ai']['provider'], string[]> = {
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo-preview'],
@@ -9,9 +8,15 @@ const AI_MODEL_OPTIONS: Record<EditableConfig['ai']['provider'], string[]> = {
   groq: ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768']
 }
 
+const TEMPLATE_INFO: Record<ReviewTemplate, { label: string; desc: string }> = {
+  default: { label: 'Default (Compact)', desc: 'Clean summary with badges, issue table, and collapsible details. Great for quick reviews.' },
+  detailed: { label: 'Detailed', desc: 'Expanded code-level feedback with inline annotations and full context per issue.' },
+  executive: { label: 'Executive (Visual)', desc: 'Badge-heavy, visual overview optimized for managers and stakeholders.' },
+}
+
 const DEFAULT_CONFIG: EditableConfig = {
   ui: { logs: { poll_interval_seconds: 3, max_events_per_poll: 200 } },
-  review: { comment_strategy: 'summary', focus: ['security', 'bugs'] },
+  review: { comment_strategy: 'summary', template: 'default', focus: ['security', 'bugs'] },
   ai: { provider: 'openai', model: 'gpt-4o-mini' }
 }
 
@@ -22,6 +27,9 @@ function normalizeConfig(input: EditableConfig): EditableConfig {
   const model = AI_MODEL_OPTIONS[provider].includes(input.ai?.model)
     ? input.ai.model
     : AI_MODEL_OPTIONS[provider][0]
+  const template: ReviewTemplate = (['default', 'detailed', 'executive'] as ReviewTemplate[]).includes(input.review?.template as ReviewTemplate)
+    ? (input.review.template as ReviewTemplate)
+    : 'default'
 
   return {
     ui: {
@@ -32,6 +40,7 @@ function normalizeConfig(input: EditableConfig): EditableConfig {
     },
     review: {
       comment_strategy: input.review?.comment_strategy || DEFAULT_CONFIG.review.comment_strategy,
+      template,
       focus: Array.isArray(input.review?.focus) ? input.review.focus : DEFAULT_CONFIG.review.focus
     },
     ai: { provider, model }
@@ -51,28 +60,19 @@ export default function ConfigPage() {
     const load = async () => {
       try {
         const data = await getEditableConfig()
-        if (!mounted) {
-          return
-        }
+        if (!mounted) return
         const normalized = normalizeConfig(data)
         setConfig(normalized)
         setFocusText((normalized.review.focus || []).join(', '))
         setError(null)
       } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to load config')
-        }
+        if (mounted) setError(err instanceof Error ? err.message : 'Failed to load config')
       } finally {
-        if (mounted) {
-          setLoading(false)
-        }
+        if (mounted) setLoading(false)
       }
     }
-
     void load()
-    return () => {
-      mounted = false
-    }
+    return () => { mounted = false }
   }, [])
 
   const parsedFocus = useMemo(
@@ -81,19 +81,14 @@ export default function ConfigPage() {
   )
 
   useEffect(() => {
-    if (!toast) {
-      return
-    }
-    const timer = window.setTimeout(() => {
-      setToast(null)
-    }, 2200)
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 2200)
     return () => window.clearTimeout(timer)
   }, [toast])
 
   const onSave = async () => {
     setSaving(true)
     setError(null)
-
     try {
       const payload: EditableConfig = {
         ui: {
@@ -104,6 +99,7 @@ export default function ConfigPage() {
         },
         review: {
           comment_strategy: config.review.comment_strategy,
+          template: config.review.template,
           focus: parsedFocus
         },
         ai: {
@@ -111,11 +107,10 @@ export default function ConfigPage() {
           model: config.ai.model
         },
       }
-
       const updated = await updateEditableConfig(payload)
-      setConfig(updated)
-      setFocusText((updated.review.focus || []).join(', '))
-      setToast({ type: 'success', message: 'Saved' })
+      setConfig(normalizeConfig(updated))
+      setFocusText((updated.review?.focus || []).join(', '))
+      setToast({ type: 'success', message: 'Saved!' })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save config'
       setError(msg)
@@ -126,141 +121,158 @@ export default function ConfigPage() {
   }
 
   return (
-    <main className="page">
-      <header className="panel">
-        <h1>Config</h1>
-        <p>
-          <Link to="/logs">Back to dashboard</Link>
-        </p>
+    <>
+      <div className="page-header">
+        <div>
+          <h1>Settings</h1>
+          <p className="page-subtitle">Configure review behavior, AI provider, and UI preferences.</p>
+        </div>
+      </div>
 
-        {loading ? <p>Loading config...</p> : null}
-        {error ? <p className="error-text">{error}</p> : null}
-        {toast ? (
-          <div className={`toast toast-${toast.type}`} role="status">
-            {toast.message}
+      {loading && <div className="empty-state">Loading config...</div>}
+      {error && <div className="alert alert-error">{error}</div>}
+      {toast && (
+        <div className={`toast toast-${toast.type}`} role="status">{toast.message}</div>
+      )}
+
+      <div className="settings-sections">
+        {/* Review Template */}
+        <section className="card">
+          <h2 className="card-title">Review Template</h2>
+          <p className="card-desc">Choose how PR review comments are formatted.</p>
+          <div className="template-grid">
+            {(Object.entries(TEMPLATE_INFO) as [ReviewTemplate, { label: string; desc: string }][]).map(([key, info]) => (
+              <label
+                key={key}
+                className={`template-option ${config.review.template === key ? 'template-selected' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="template"
+                  value={key}
+                  checked={config.review.template === key}
+                  onChange={() =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      review: { ...prev.review, template: key }
+                    }))
+                  }
+                />
+                <div>
+                  <span className="template-name">{info.label}</span>
+                  <span className="template-desc">{info.desc}</span>
+                </div>
+              </label>
+            ))}
           </div>
-        ) : null}
-
-        <section className="config-grid">
-          <label>
-            Poll Interval (sec)
-            <input
-              type="number"
-              min={1}
-              value={config.ui.logs.poll_interval_seconds}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  ui: {
-                    ...prev.ui,
-                    logs: {
-                      ...prev.ui.logs,
-                      poll_interval_seconds: Number(e.target.value)
-                    }
-                  }
-                }))
-              }
-            />
-          </label>
-
-          <label>
-            Max Events Per Poll
-            <input
-              type="number"
-              min={20}
-              value={config.ui.logs.max_events_per_poll}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  ui: {
-                    ...prev.ui,
-                    logs: {
-                      ...prev.ui.logs,
-                      max_events_per_poll: Number(e.target.value)
-                    }
-                  }
-                }))
-              }
-            />
-          </label>
-
-          <label>
-            LLM Provider
-            <select
-              value={config.ai.provider}
-              onChange={(e) => {
-                const provider = e.target.value as EditableConfig['ai']['provider']
-                setConfig((prev) => ({
-                  ...prev,
-                  ai: {
-                    provider,
-                    model: AI_MODEL_OPTIONS[provider][0]
-                  }
-                }))
-              }}
-            >
-              <option value="openai">openai</option>
-              <option value="anthropic">anthropic</option>
-              <option value="groq">groq</option>
-            </select>
-          </label>
-
-          <label>
-            LLM Model
-            <select
-              value={config.ai.model}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  ai: {
-                    ...prev.ai,
-                    model: e.target.value
-                  }
-                }))
-              }
-            >
-              {AI_MODEL_OPTIONS[config.ai.provider].map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Comment Strategy
-            <select
-              value={config.review.comment_strategy}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  review: {
-                    ...prev.review,
-                    comment_strategy: e.target.value as EditableConfig['review']['comment_strategy']
-                  }
-                }))
-              }
-            >
-              <option value="summary">summary</option>
-              <option value="inline">inline</option>
-              <option value="both">both</option>
-            </select>
-          </label>
-
-          <label>
-            Focus Areas (comma separated)
-            <input
-              type="text"
-              value={focusText}
-              onChange={(e) => setFocusText(e.target.value)}
-            />
-          </label>
         </section>
 
-        <button type="button" disabled={saving || loading} onClick={onSave}>
-          {saving ? 'Saving...' : 'Save Config'}
+        {/* AI Provider */}
+        <section className="card">
+          <h2 className="card-title">AI Provider</h2>
+          <p className="card-desc">Select the LLM backend and model for code analysis.</p>
+          <div className="config-row">
+            <label className="field">
+              <span className="field-label">Provider</span>
+              <select
+                value={config.ai.provider}
+                onChange={(e) => {
+                  const provider = e.target.value as EditableConfig['ai']['provider']
+                  setConfig((prev) => ({
+                    ...prev,
+                    ai: { provider, model: AI_MODEL_OPTIONS[provider][0] }
+                  }))
+                }}
+              >
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="groq">Groq</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Model</span>
+              <select
+                value={config.ai.model}
+                onChange={(e) =>
+                  setConfig((prev) => ({ ...prev, ai: { ...prev.ai, model: e.target.value } }))
+                }
+              >
+                {AI_MODEL_OPTIONS[config.ai.provider].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        {/* Review Settings */}
+        <section className="card">
+          <h2 className="card-title">Review Behavior</h2>
+          <p className="card-desc">Adjust comment strategy and focus areas.</p>
+          <div className="config-row">
+            <label className="field">
+              <span className="field-label">Comment Strategy</span>
+              <select
+                value={config.review.comment_strategy}
+                onChange={(e) =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    review: { ...prev.review, comment_strategy: e.target.value as EditableConfig['review']['comment_strategy'] }
+                  }))
+                }
+              >
+                <option value="summary">Summary</option>
+                <option value="inline">Inline</option>
+                <option value="both">Both</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Focus Areas</span>
+              <input type="text" value={focusText} onChange={(e) => setFocusText(e.target.value)} placeholder="security, bugs, performance" />
+            </label>
+          </div>
+        </section>
+
+        {/* UI Settings */}
+        <section className="card">
+          <h2 className="card-title">UI Preferences</h2>
+          <p className="card-desc">Control polling interval and event limits for the live dashboard.</p>
+          <div className="config-row">
+            <label className="field">
+              <span className="field-label">Poll Interval (sec)</span>
+              <input
+                type="number" min={1}
+                value={config.ui.logs.poll_interval_seconds}
+                onChange={(e) =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    ui: { ...prev.ui, logs: { ...prev.ui.logs, poll_interval_seconds: Number(e.target.value) } }
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Max Events Per Poll</span>
+              <input
+                type="number" min={20}
+                value={config.ui.logs.max_events_per_poll}
+                onChange={(e) =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    ui: { ...prev.ui, logs: { ...prev.ui.logs, max_events_per_poll: Number(e.target.value) } }
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div className="save-bar">
+        <button type="button" className="btn btn-primary" disabled={saving || loading} onClick={onSave}>
+          {saving ? 'Saving...' : 'Save Settings'}
         </button>
-      </header>
-    </main>
+      </div>
+    </>
   )
 }
