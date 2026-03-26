@@ -1,0 +1,670 @@
+============================================================
+MCP AI CODE REVIEW SERVER — KAPSAMLI BİLGİ TABANI
+============================================================
+Geliştirici: Mennan Sevim
+Versiyon: 2.0.0 | Mart 2026
+Lisans: Açık Kaynak (Open Source)
+Dil: Python (Backend) + TypeScript/React (Frontend)
+
+============================================================
+BÖLÜM 1: PROJENİN TANIMI VE AMACI
+============================================================
+
+MCP AI Code Review Server, self-hosted ve açık kaynak bir yapay zeka destekli otomatik kod inceleme sistemidir. Mennan Sevim tarafından geliştirilmiştir.
+
+Projenin temel amacı: Bir geliştirici herhangi bir Git platformunda (GitHub, GitLab, Bitbucket veya Azure DevOps) bir Pull Request açtığında, sistem otomatik olarak o PR'ı yapay zeka ile inceler, OWASP Top 10 tabanlı güvenlik taraması yapar, AI ile yazılmış düşük kaliteli kodu (AI Slop) tespit eder ve sonucu doğrudan PR'a yorum olarak yazar. Tüm bunlar saniyeler içinde, hiçbir manuel müdahale olmadan gerçekleşir.
+
+Sistem tamamen self-hosted çalışır, yani kaynak kodlar asla şirket altyapısı dışına çıkmaz. Bu özellik finans, savunma, sağlık gibi veri gizliliğinin kritik olduğu sektörler için büyük avantaj sağlar. GDPR ve KVKK uyumludur.
+
+Projenin çıkış hikayesi: Ekip olarak "AI destekli code review yapabileceğimiz esnek ve açık kaynak bir uygulama" fikrinden yola çıkıldı. Piyasadaki mevcut çözümler (CodeRabbit, Codacy, SonarCloud) ya çok pahalı, ya sınırlı platform desteği sunuyor, ya da kodların 3. parti sunuculara gitmesi gerekiyordu. Bu sorunları tek bir self-hosted çözümle ortadan kaldırmak amacıyla proje geliştirildi.
+
+============================================================
+BÖLÜM 2: NEDEN BU PROJE GELİŞTİRİLDİ? (PROBLEM TANIMI)
+============================================================
+
+Kod inceleme süreci yazılım geliştirmenin en kritik aşamalarından biridir. Ancak mevcut durumda ciddi sorunlar vardır:
+
+1. ZAMAN KAYBI: Bir geliştirici günde ortalama 2-4 saat sadece başkalarının kodunu incelemeye harcıyor. Bu ciddi bir üretkenlik kaybı.
+
+2. İNSAN HATASI: İnsan gözü her şeyi yakalayamıyor. Özellikle güvenlik açıkları, ince compilation hataları ve performans sorunları gözden kaçabiliyor.
+
+3. PLATFORM DAĞINIKLIĞI: Her platform için farklı araç kullanmak gerekiyor. Tool maliyeti ve eğitim yükü artıyor.
+
+4. TUTARSIZ KALİTE: Review standartları reviewer'a göre değişiyor. Bir kişi detaylı bakarken diğeri yüzeysel geçebiliyor.
+
+5. AI SLOP SORUNU: Artık herkes Copilot, ChatGPT ile kod üretiyor. Ama bu kodun kalitesi kontrol edilmiyor. Gereksiz yorumlar, generic değişken isimleri, copy-paste bloklar birikiyor.
+
+6. GÜVENLİK TARAMASI AYRI ARAÇ GEREKTİRİYOR: SAST, DAST, secret scan için ayrı ayrı araçlar kurmak gerekiyor.
+
+7. MEVCUT ÇÖZÜMLER PAHALI VE SINIRLI: CodeRabbit kişi başı 12-24 dolar/ay. Vendor lock-in riski var.
+
+8. VERİ GİZLİLİĞİ ENDİŞESİ: Mevcut SaaS çözümlerinde kodunuz 3. parti sunuculara gidiyor.
+
+============================================================
+BÖLÜM 3: NEDEN PYTHON?
+============================================================
+
+Python, AI ekosisteminin lingua franca'sıdır. Bu proje bir AI-first projedir ve Python en pragmatik tercihti.
+
+Nedenler:
+- OpenAI, Anthropic, Groq — üçünün de resmi SDK'ları Python-first.
+- GitHub, GitLab, Bitbucket, Azure DevOps için olgun Python kütüphaneleri var: PyGithub, python-gitlab, atlassian-python-api, azure-devops.
+- MCP (Model Context Protocol) resmi SDK'sı Python'da.
+- FastAPI ile dakikalar içinde production-ready API kurulabiliyor.
+- Pydantic v2 ile tip güvenliği ve otomatik validation geliyor.
+- Async/await native destek var.
+- Docker image boyutu yaklaşık 150 megabyte.
+
+Karşılaştırma tablosu:
+- AI SDK Olgunluğu: Python ★★★★★ | Node.js ★★★ | C#/.NET ★★ | Go ★★
+- Platform API Kütüphaneleri: Python ★★★★★ | Node.js ★★★ | C#/.NET ★★★ | Go ★★
+- MCP SDK Desteği: Python ★★★★★ | Node.js ★★★★ | C#/.NET ★★ | Go ★
+- Geliştirme Hızı: Python ★★★★★ | Node.js ★★★★ | C#/.NET ★★★ | Go ★★★
+
+============================================================
+BÖLÜM 4: MİMARİ GENEL BAKIŞ
+============================================================
+
+Sistem modüler, katmanlı bir mimari üzerine inşa edilmiştir. Tek bir webhook endpoint'i herhangi bir platformdan gelen event'leri alır, AI destekli review engine'den geçirir ve sonuçları PR yorumu olarak geri gönderir.
+
+Ana bileşenler:
+
+1. WEBHOOK HANDLER: Herhangi bir platformdan gelen webhook isteğini alır ve HTTP header'larına bakarak platformu otomatik tespit eder.
+
+2. LANGUAGE DETECTOR: 25+ programlama dilini otomatik tespit eder. PR'daki dosya uzantılarına bakarak en baskın dili çıkarır.
+
+3. RULES HELPER: Markdown tabanlı, Git versiyonlu kural dosyalarını yükler. Dile özel kuralları çözer.
+
+4. AI REVIEW ENGINE: Üç farklı AI provider'ı destekler (Groq, OpenAI, Anthropic). Factory pattern ile instance oluşturur, strategy pattern ile runtime'da geçiş yapar.
+
+5. REVIEW MODÜLLERI: Tek seferde dört analiz yapar: Kod Kalitesi, Güvenlik Deep Scan (OWASP), AI Slop Detection, Compilation Kontrolü.
+
+6. COMMENT SERVICE + TEMPLATE ENGINE: AI sonuçlarını seçili template ile formatlar (Default/Detailed/Executive/Custom).
+
+7. PLATFORM ADAPTERS: PR'a yorum gönderir ve status günceller. Her platform için ayrı adapter sınıfı var.
+
+8. LIVE LOG STORE + ANALYTICS STORE: In-memory store'lar. Gerçek zamanlı event streaming ve aggrege metrikler.
+
+9. REACT UI DASHBOARD: 4 sayfalı frontend (PR Runs, Run Detail, Analytics, Settings).
+
+Tasarım İlkeleri:
+- Platform Agnostic (platform bağımsız)
+- Provider Agnostic (AI sağlayıcı bağımsız)
+- Config-Driven (her şey YAML'dan yönetiliyor)
+- Self-Hosted (kendi altyapınızda çalışır)
+- Observable (canlı izlenebilir)
+
+============================================================
+BÖLÜM 5: REVIEW AKIŞI (5 ADIM)
+============================================================
+
+Bir PR açıldığında uçtan uca review akışı şöyle işler:
+
+ADIM 1 — WEBHOOK ALINDI:
+Platform webhook gönderiyor. Sistem bunu alıyor, HTTP header'lardan platformu tespit ediyor ve live log kaydını başlatıyor. Bu noktadan itibaren review dashboard'dan canlı izlenebilir.
+
+ADIM 2 — DIFF ÇEKİLDİ:
+Platform adapter devreye giriyor. İlgili platformun API'sini çağırıp PR'ın diff'ini çekiyor. Diff'teki dosya uzantılarına bakarak programlama dilini tespit ediyor. O dile özel rule dosyalarını yüklüyor.
+
+Diff çekme yöntemleri platforma göre değişir:
+- GitHub: PyGithub kütüphanesi ile pr.get_files() → her file.patch birleştirilir
+- GitLab: python-gitlab ile mr.diffs.list() → her diff.diff birleştirilir
+- Bitbucket: REST API ile GET /pullrequests/{id}/diff → tam unified diff metin olarak döner
+- Azure DevOps: azure-devops Git client ile get_pull_request_iteration_changes → son iteration'ın change_entries alınır
+
+Önemli: Webhook sadece "bir PR açıldı/güncellendi" sinyalini verir. Diff içeriği webhook payload'ında yoktur. Sistem bu sinyali aldıktan sonra, ilgili platformun API'sini kullanarak diff'i ayrıca çeker. Bu yüzden her platform için token/auth gerekir.
+
+ADIM 3 — AI REVIEW (KRİTİK ADIM):
+Diff ve kurallar AI'a gönderilir. AI tek seferde dört farklı analiz yapar:
+- Standart kod kalitesi kontrolü
+- OWASP tabanlı güvenlik taraması
+- AI Slop detection
+- Compilation kontrolü
+
+SHORT-CIRCUIT MEKANİZMASI: Eğer compilation hatası bulunursa, diğer kontroller yapılmaz. Derlenmeyen kodda güvenlik analizi yapmanın anlamı yoktur. Bu iki katmanda garanti edilir:
+1) AI prompt'una açık talimat verilir: "compilation hatası bulursan dur"
+2) AI'dan gelen yanıt programatik olarak filtrelenir (post-processing)
+
+AI'a giden bağlam:
+- Diff metni (ilk 10.000 karakter ile sınırlı)
+- Değişen dosya yolları (sadece isimler)
+- Focus alanları ve varsa rule dosyaları (15.000 karakter ile sınırlı)
+- Projenin tamamı veya diğer dosyalar gönderilMEZ
+
+ADIM 4 — YORUM GÖNDERİLDİ:
+Sonuçlar seçili template ile formatlanır — badge'ler, tablolar, detay bölümleri eklenir. PR'a yorum olarak gönderilir.
+
+ADIM 5 — STATUS GÜNCELLENDİ:
+PR'ın status'u güncellenir. Critical sorun varsa failure olarak işaretlenir ve merge otomatik engellenir. Review sonuçları analytics store'a kaydedilir.
+
+============================================================
+BÖLÜM 6: GÜVENLİK DERİN TARAMASI (SECURITY DEEP SCAN)
+============================================================
+
+Her PR, OWASP Top 10 framework'ü kullanılarak kapsamlı güvenlik analizi yapılır. AI sadece pattern matching yapmaz, bağlamı da anlar. Mesela bir string interpolation gördüğünde, bunun bir SQL sorgusu içinde mi yoksa bir log mesajında mı olduğunu ayırt edebilir.
+
+OWASP TOP 10 KATEGORİLERİ:
+
+A1 — Broken Access Control (CRITICAL):
+Bir kullanıcının yetkisi olmayan kaynaklara erişebilmesi. Mesela normal bir kullanıcı /admin/users endpoint'ine istek atıp tüm kullanıcı listesini görebiliyorsa bu A1 ihlali. Sistem yetki kontrolü eksik olan endpoint'leri tespit eder.
+
+A2 — Cryptographic Failures (CRITICAL):
+Hassas verilerin düzgün şifrelenmemesi. Şifrelerin MD5 veya SHA1 gibi zayıf algoritmalarla hash'lenmesi, HTTPS yerine HTTP kullanılması, encryption key'in kodda hardcoded olması.
+
+A3 — Injection (CRITICAL):
+SQL injection, NoSQL injection, OS command injection, LDAP injection. Kullanıcıdan gelen verinin doğrudan sorguya veya komuta eklenmesi. String concatenation ile SQL sorgusu oluşturmak klasik örnek. Parameterized query kullanılmamışsa sistem bunu yakalar.
+
+A4 — Insecure Design (HIGH):
+Mimari seviyede sorunlar. Rate limiting olmaması, brute force koruması eksikliği, iş mantığında güvenlik kontrolünün atlanabilmesi.
+
+A5 — Security Misconfiguration (HIGH):
+Debug modunun production'da açık kalması, default şifrelerin değiştirilmemesi, gereksiz servislerin aktif olması, error mesajlarında stack trace gösterilmesi.
+
+A6 — Vulnerable & Outdated Components (MEDIUM):
+Bilinen güvenlik açığı olan eski kütüphanelerin kullanılması. Import veya dependency tanımlarında eski versiyonlar tespit edilirse uyarı verilir.
+
+A7 — Identification & Authentication Failures (CRITICAL):
+Zayıf şifre politikası, session yönetimi hataları, token süresinin sonsuz olması, multi-factor authentication eksikliği. JWT token'ın expire süresi ayarlanmamışsa bu kategoriye girer.
+
+A8 — Software & Data Integrity Failures (HIGH):
+CI/CD pipeline'ında bütünlük kontrolü yapılmaması. Insecure deserialization. Güvenilmeyen kaynaktan gelen veriyi deserialize etmek ciddi risk.
+
+A9 — Security Logging & Monitoring Failures (MEDIUM):
+Güvenlik olaylarının loglanmaması veya izlenmemesi. Login başarısızlıkları loglanmıyor mu? Kritik işlemler audit trail bırakıyor mu?
+
+A10 — Server-Side Request Forgery / SSRF (HIGH):
+Sunucunun kullanıcı girdisiyle iç ağdaki kaynaklara istek yapması. URL fetch özelliği varsa ve kullanıcı http://localhost:6379 gibi bir adres verip Redis'e erişebiliyorsa bu A10.
+
+SECRET LEAK DETECTION:
+Kodda hardcoded API key, password, connection string, private key gibi sensitive bilgileri tarayıp CRITICAL olarak raporlar. AWS, GCP, Azure key formatları gibi bilinen pattern'leri tanır.
+
+GÜVENLİK PUANI (Security Score):
+10 üzerinden başlar. Her critical issue -4, high -2, medium -1 puan düşürür. PR comment'te badge olarak görünür. Secret leak tespit edilirse ayrı kırmızı badge eklenir. Her issue'nun OWASP ID'si (A1, A3 vb.) ve mümkünse CWE ID'si (CWE-89 vb.) raporlanır.
+
+============================================================
+BÖLÜM 7: AI SLOP TESPİTİ
+============================================================
+
+AI Slop, yapay zeka kodlama asistanlarının (Copilot, ChatGPT vb.) ürettiği düşük kaliteli kod kalıplarıdır. Teknik olarak çalışır ama bakım maliyetini ciddi artırır.
+
+8 TESPİT EDİLEN PATTERN:
+
+1. REDUNDANT COMMENTS (Gereksiz Yorumlar):
+Kodu aynen tekrar eden yorumlar. Örnek: "// Initialize the variable" — bunu zaten kodu okuyan herkes görüyor, bilgi değeri sıfır.
+
+2. GENERIC NAMING (Genel İsimler):
+"data", "result", "temp", "item", "value", "obj", "thing" gibi anlamsız değişken isimleri.
+
+3. BOILERPLATE BLOAT (Şablon Şişkinliği):
+Framework'ün zaten hallettiği şeylerin tekrar yazılması. Gereksiz null check'ler, tek satırlık kütüphane çağrısı yerine manuel implementasyon.
+
+4. COPY-PASTE BLOCKS (Kopyala-Yapıştır Blokları):
+Tekrar eden kod blokları. Bir loop veya helper function ile çözülebilecek şeyler. NOT: Sistem sadece diff içindeki tekrarları görebilir, proje genelindeki mevcut tekrarları göremez. Bu bilinen bir limitasyondur.
+
+5. CATCH-ALL EXCEPTION (Genel Exception Yakalama):
+"except Exception" veya "catch (Exception e)" gibi çok geniş hata yakalama. Spesifik exception'ları yutarak bug'ları gizler.
+
+6. HALLUCINATED API (Uydurulmuş API):
+AI'ın uydurduğu, framework/kütüphanede var olmayan metod, property veya sınıf çağrıları.
+
+7. TODO/FIXME SCAFFOLD (Tamamlanmamış İskelet):
+"// TODO: implement this", "// Add error handling here" gibi AI tarafından bırakılan tamamlanmamış kod.
+
+8. INCONSISTENT PATTERN (Tutarsız Kalıp):
+Aynı dosyada callback + async/await gibi farklı paradigmaların karışması.
+
+KRİTİK TASARIM KARARI:
+AI Slop sorunları ASLA merge'ü engellemez. Maximum severity MEDIUM. AI yanlışlıkla bir slop issue'ya critical derse bile, post-processing'de otomatik olarak medium'a düşürülür. Bunlar bilgilendirme amaçlı kalite uyarılarıdır.
+
+AI SLOP TESPİTİNİN LİMİTASYONU:
+AI'a sadece diff gönderilir, projenin tamamı gönderilmez. Dolayısıyla:
+- Diff içindeki tekrarlar tespit edilir (ör. diff'te 3 kez tekrar eden benzer blok)
+- Projede zaten var olan tekrarlar tespit edileMEZ (ör. başka dosyada aynı fonksiyon varsa)
+Bu bilinçli bir trade-off'tur: tüm kod tabanını AI'a göndermek hem token maliyeti hem context window limiti açısından pratik değildir.
+
+============================================================
+BÖLÜM 8: LIVE DASHBOARD
+============================================================
+
+React tabanlı, 4 sayfalı bir dashboard gerçek zamanlı izleme sağlar.
+
+Teknoloji: React + TypeScript + Vite | Polling tabanlı | Sıfır CSS framework bağımlılığı (Pure CSS design system)
+
+4 SAYFA:
+
+1. PR RUNS (Ana Ekran):
+Tüm aktif ve tamamlanan review'ları kart olarak listeler. Her kartta status badge'i, score ve issue sayısı görünür. Üstte özet istatistikler: aktif, tamamlanan, hatalı, toplam.
+
+2. RUN DETAIL:
+Timeline görünümü. Review sürecinin her adımını (webhook → diff → AI → comment → status) renk kodlu ilerleme ile gösterir.
+
+3. ANALYTICS:
+9 temel metrik kartı ve 4 analiz modülü. Score Trend, Security Breakdown, Top Issue Categories, Author Stats.
+
+4. SETTINGS:
+Template seçici (radio button), AI provider/model dropdown'ları, comment strategy, polling interval. Değişiklikler anında backend'e uygulanır, restart gerekmez.
+
+============================================================
+BÖLÜM 9: REVIEW ANALYTICS
+============================================================
+
+Analytics sayfası tüm review verilerini bir araya getirip anlamlı metrikler sunar. Temel soru: "Ekibimiz nasıl gidiyor? Kod kalitemiz iyileşiyor mu kötüleşiyor mu?"
+
+9 TEMEL METRİK:
+1. Total Reviews (Toplam review sayısı)
+2. Avg Score (Ortalama kalite puanı)
+3. Avg Security Score (Ortalama güvenlik puanı)
+4. Total Issues (Toplam sorun sayısı)
+5. Critical Count (Critical seviye sorun sayısı)
+6. Security Issues (Güvenlik sorunları sayısı)
+7. AI Slop Count (AI slop tespit sayısı)
+8. Blocked Merges (Merge engellenen PR sayısı)
+9. Secret Leaks (Secret leak sayısı)
+
+4 ANALİZ MODÜLÜ:
+1. Score Trend: PR bazında kalite ve güvenlik puanlarını grafik olarak gösterir.
+2. Security Breakdown: OWASP kategorilerini ve threat type'ları bar chart olarak görselleştirir.
+3. Top Issue Categories: En sık karşılaşılan sorun tiplerini gösterir.
+4. Author Stats: Geliştirici bazında review sayısı, ortalama puan, toplam issue sayısı ve merge engelleme sıklığı.
+
+NOT: Veriler şu an in-memory tutuluyor, sunucu restart'ta sıfırlanıyor. Roadmap'te persistent storage (SQLite/PostgreSQL) planlanıyor.
+
+============================================================
+BÖLÜM 10: SETTINGS VE TEMPLATE SİSTEMİ
+============================================================
+
+Tüm review parametreleri runtime'da Settings sayfasından değiştirilebilir.
+
+4 TEMPLATE:
+
+1. DEFAULT (Kompakt):
+Geliştiriciler için. Badge'ler, kısa issue tablosu, açılır-kapanır (collapsible) detaylar.
+
+2. DETAILED (Detaylı):
+QA ekibi ve tam review isteyenler için. Dosya bazlı dağılım, her sorunun tam kodu, satır numarası, kod snippet'i, severity matrix.
+
+3. EXECUTIVE (Yönetici):
+Tech lead'ler ve yöneticiler için. Shield badge'leri ağırlıklı, risk analizi tablosu, tech debt tahmini, genel durum özeti.
+
+4. CUSTOM (Özel):
+custom_templates/ klasörüne kendi markdown dosyanızı koyabilirsiniz. Placeholder'larla çalışır: {score}, {total_issues}, {issues_list}, {summary}, {issues_table} gibi.
+
+v2.0 ile tüm template'lere eklenen yeni bölümler: AI Slop Badge, Security Score Badge, Secret Leak Badge, OWASP tablosu, AI Slop detay bölümü.
+
+HOT-SWAP: Template değiştirildiğinde backend anında CommentService'i yeniden oluşturur. Sunucu restart gerekmez. Ayarlar config.overrides.yaml dosyasına persist edilir.
+
+DİĞER AYARLAR: AI Provider + Model, Comment Strategy (summary/inline/both), Focus Areas, Dashboard Polling Interval.
+
+============================================================
+BÖLÜM 11: PLATFORM DESTEĞİ
+============================================================
+
+4 büyük Git platformu tek bir /webhook endpoint'i üzerinden desteklenir.
+
+DESTEKLENEN PLATFORMLAR:
+- GitHub: Bearer Token ile kimlik doğrulama
+- GitLab: Private Token ile kimlik doğrulama
+- Bitbucket: App Password ile kimlik doğrulama
+- Azure DevOps: PAT (Personal Access Token) ile kimlik doğrulama
+
+OTOMATİK PLATFORM TESPİTİ:
+Her platform kendine özgü HTTP header'ları gönderir:
+- GitHub: X-GitHub-Event header'ı
+- GitLab: X-Gitlab-Event header'ı
+- Bitbucket: X-Event-Key header'ı
+- Azure DevOps: X-VSS-ActivityId header'ı
+
+Sistem gelen isteğin header'ına bakarak platformu otomatik tespit eder. Hiçbir header bulunamazsa payload yapısından da çıkarım yapılabilir.
+
+TAM ÖZELLİK SETİ (4 platformda eşit):
+- Diff çekme
+- Summary yorum yazma
+- Satır bazlı inline yorum
+- PR status güncelleme
+- Merge bloklama
+
+MİMARİ:
+Her platform için bir adapter sınıfı var ve hepsi BasePlatformAdapter abstract class'ından türer. Yeni platform eklemek için sadece yeni adapter yazmak yeterli. Open-Closed Principle uygulaması.
+
+============================================================
+BÖLÜM 12: AI PROVIDER SİSTEMİ
+============================================================
+
+3 farklı AI provider desteklenir. Hepsi aynı abstract interface'den türer.
+
+PROVIDER'LAR:
+
+1. GROQ (Llama 3.3 70B):
+- Hız: Çok hızlı (5-15 saniye)
+- Maliyet: Ücretsiz/düşük
+- Öneri: Günlük yüksek hacimli kullanım için ideal
+
+2. OPENAI (GPT-4o, GPT-4o-mini):
+- Hız: Orta (15-30 saniye)
+- Maliyet: Orta
+- Öneri: Karmaşık kod analizi ve derin mantık inceleme için ideal
+
+3. ANTHROPIC (Claude 3.5 Sonnet):
+- Hız: Orta (15-30 saniye)
+- Maliyet: Orta-yüksek
+- Öneri: Güvenlik analizi ve nüanslı açık tespiti konusunda çok başarılı
+
+PROVIDER DEĞİŞTİRME (3 Yol):
+1. config.yaml dosyasından provider ve model alanını değiştirerek
+2. UI Settings sayfasından dropdown ile seçerek
+3. MCP tool çağrısında runtime override yaparak
+Üçü de sunucu yeniden başlatmaya gerek kalmadan çalışır.
+
+TASARIM PATTERNLERİ:
+- Factory Pattern: İsimden provider instance oluşturma
+- Strategy Pattern: Runtime'da provider geçişi
+- Sıfır vendor lock-in: Yeni provider eklemek için interface'i implemente edip config'e eklemek yeterli
+
+============================================================
+BÖLÜM 13: DİL TESPİTİ VE KURAL SİSTEMİ
+============================================================
+
+25+ DESTEKLENEN DİL:
+C#, Java, Python, TypeScript, JavaScript, Go, Rust, C, C++, Swift, Kotlin, Scala, PHP, Ruby, Dart, Shell, PowerShell, SQL, HTML, CSS, YAML, JSON, XML, Markdown ve daha fazlası.
+
+Tespit mekanizması: PR'daki dosya uzantılarına bakılır. En baskın dil seçilir. Örnek: 5 .cs dosyası + 2 .json dosyası varsa sonuç C#.
+
+19 KURAL DOSYASI (Markdown tabanlı, Git versiyonlu):
+Genel kurallar: compilation.md, security.md, performance.md, best-practices.md
+Dile özel: csharp-compilation.md, python-security.md, go-performance.md vb.
+
+Kurallar AI prompt'una bağlam olarak eklenir. C# kodu incelenirken Python kuralları uygulanmaz — false positive'ler ciddi ölçüde azalır.
+
+OTOMATİK RULE ÜRETİMİ:
+İlk kez yeni bir dilde PR geldiğinde (ör. Rust), sistem ilgili rule dosyasını arar. Bulamazsa RuleGenerator devreye girer: genel şablonu alır, AI'a verir ve "bunu Rust diline özel yeniden yaz" der. Üretilen dosya kaydedilir. Sistem kendi bilgi tabanını genişletir.
+
+FOCUS_RULE_FILES eşlemesi:
+- compilation → compilation.md
+- security → security.md
+- performance → performance.md
+- dotnet / dotnet_fundamentals → dotnet-fundamentals.md
+- best_practices / code_quality → best-practices.md
+- bugs → compilation.md
+
+============================================================
+BÖLÜM 14: SHORT-CIRCUIT VE SEVERİTY SİSTEMİ
+============================================================
+
+SHORT-CIRCUIT MEKANİZMASI:
+Eğer kodda syntax/compilation hatası varsa, güvenlik analizi, performans kontrolü, AI slop tespiti yapılmaz. Sadece compilation sorunları raporlanır.
+
+İki katmanlı garanti:
+1. AI prompt'una açık talimat: "compilation hatası bulursan dur, başka bir şey kontrol etme"
+2. Programatik filtreleme: AI talimata uymasa bile, post-processing'de sadece compilation issue'lar bırakılır
+
+5 SEVERİTY SEVİYESİ:
+1. CRITICAL: PR status failure olur, merge engellenir
+2. HIGH: Önemli sorun ama tek başına merge engellemez
+3. MEDIUM: Orta seviye uyarı (AI Slop max bu seviye)
+4. LOW: Düşük öncelik
+5. INFO: Bilgilendirme
+
+MERGE BLOKLAMA:
+Herhangi bir critical issue PR status'unu failure yapar. Branch protection aktifse merge otomatik engellenir. Geliştirici düzeltip push ettiğinde yeni review tetiklenir.
+
+============================================================
+BÖLÜM 15: MCP VE IDE ENTEGRASYONU
+============================================================
+
+MCP (Model Context Protocol), Anthropic tarafından geliştirilen açık bir standarttır. AI modellerinin harici araçlarla iletişim kurmasını sağlar.
+
+ENDPOINT: GET /mcp/sse (Server-Sent Events)
+
+3 MCP TOOL:
+
+1. review_code:
+Seçili bir kod parçacığını AI'a review ettirme. IDE içinden anında geri bildirim.
+
+2. analyze_diff:
+Bir diff'in istatistiklerini çıkarma — dosya sayısı, değişiklik dağılımı, karmaşıklık göstergeleri.
+
+3. security_scan:
+Sadece güvenlik odaklı OWASP taraması yapma. Tam review tetiklemeden.
+
+DESTEKLENEN IDE'LER:
+Claude Desktop, Cursor, VS Code, Windsurf — herhangi bir MCP-compatible client bağlanabilir.
+
+KULLANIM SENARYOSU:
+PR açmadan önce bile kodu kontrol edebilme. Cursor veya VS Code'da kod yazarken MCP tool çağrısı yapılır, saniyeler içinde AI geri bildirim verir. Pre-review imkanı. Provider override da desteklenir — ör. normalde Groq kullanılıyor ama güvenlik taraması için Claude tercih edilebilir.
+
+============================================================
+BÖLÜM 16: API ENDPOINT REFERANSı
+============================================================
+
+20+ REST API endpoint'i FastAPI üzerinde çalışır. Otomatik OpenAPI/Swagger dokümantasyonu localhost:8000/docs adresinde mevcuttur.
+
+CORE ENDPOINT'LER:
+- Health check
+- POST /webhook — Webhook alımı
+- GET /mcp/sse — MCP SSE bağlantısı
+
+CONFIG ENDPOINT'LERİ:
+- GET /api/config — Mevcut config'i okuma
+- PUT /api/config — Config güncelleme
+- GET /templates — Template listesi
+- POST /templates/switch — Runtime template değiştirme
+
+RULES ENDPOINT'LERİ:
+- GET /rules — Kural dosyalarını listeleme
+- GET /rules/resolve — Focus area ve dile göre çözümleme
+- GET /rules/{filename} — Belirli kuralın içeriği
+
+LIVE LOGS ENDPOINT'LERİ:
+- Logs config
+- Aktif run'lar
+- Tüm run'lar
+- Belirli bir run'ın event'leri (cursor-based pagination)
+
+ANALYTICS ENDPOINT'LERİ:
+- Overview
+- Score trend
+- Top issues
+- Security breakdown
+- Author stats
+- Recent reviews
+
+UI ENDPOINT'LERİ:
+- React SPA serve etme
+- Client-side routing
+
+============================================================
+BÖLÜM 17: CODERABBIT KARŞILAŞTIRMASI
+============================================================
+
+CodeRabbit piyasanın en bilinen AI code review aracıdır. MCP Server her boyutta öne geçer.
+
+KARŞILAŞTIRMA TABLOSU:
+- Platform Sayısı: CodeRabbit 2 | MCP Server 4
+- AI Provider: CodeRabbit Sabit | MCP Server 3, değiştirilebilir
+- OWASP Scan: CodeRabbit YOK | MCP Server VAR
+- AI Slop: CodeRabbit YOK | MCP Server VAR
+- Live Dashboard: CodeRabbit YOK | MCP Server VAR
+- Analytics: CodeRabbit Temel | MCP Server Kapsamlı
+- Template: CodeRabbit 1 | MCP Server 4 + custom
+- IDE (MCP): CodeRabbit YOK | MCP Server VAR
+- Self-hosted: CodeRabbit YOK | MCP Server VAR
+- Open Source: CodeRabbit YOK | MCP Server VAR
+
+MALİYET KARŞILAŞTIRMASI:
+- 10 kişi/yıl: CodeRabbit $2,880 → MCP Server $300-840 (%70-90 tasarruf)
+- 50 kişi/yıl: Tasarruf $13,000'ın üzerinde
+- MCP Server'da sadece AI API maliyeti + küçük sunucu maliyeti var
+
+VERİ GİZLİLİĞİ:
+CodeRabbit'te kodunuz 3. parti sunuculara gider. MCP Server self-hosted olduğu için her şey kendi kontrolünüzde kalır.
+
+============================================================
+BÖLÜM 18: TEKNİK DETAYLAR — KOD YAPISI
+============================================================
+
+PROJE YAPISI:
+```
+mcp-server/
+├── server.py                    # Ana sunucu, FastAPI uygulaması, 20+ endpoint
+├── config.yaml                  # Ana yapılandırma dosyası
+├── config.overrides.yaml        # Runtime'da değiştirilen ayarlar
+├── requirements.txt             # Python bağımlılıkları
+├── adapters/
+│   ├── base_adapter.py          # BasePlatformAdapter abstract class
+│   ├── github_adapter.py        # GitHub adapter (PyGithub)
+│   ├── gitlab_adapter.py        # GitLab adapter (python-gitlab)
+│   ├── bitbucket_adapter.py     # Bitbucket adapter (REST API)
+│   └── azure_adapter.py         # Azure DevOps adapter (azure-devops SDK)
+├── services/
+│   ├── ai_reviewer.py           # Ana AI review engine, prompt, post-processing
+│   ├── diff_analyzer.py         # Diff ayrıştırma (unidiff kütüphanesi)
+│   ├── language_detector.py     # Dil tespiti (dosya uzantılarından)
+│   ├── rules_service.py         # Kural dosyalarını yükleme ve çözümleme
+│   ├── comment_service.py       # Yorum formatlama
+│   ├── rule_generator.py        # AI ile otomatik kural üretimi
+│   ├── analytics_store.py       # Analytics veri deposu (in-memory)
+│   ├── live_log_store.py        # Canlı log deposu (in-memory)
+│   └── ai_providers/            # AI provider implementasyonları
+├── webhook/
+│   ├── handler.py               # Webhook işleyici, platform tespiti
+│   └── parsers/                 # Platform-specific webhook parser'lar
+│       ├── github_parser.py
+│       ├── gitlab_parser.py
+│       ├── bitbucket_parser.py
+│       └── azure_parser.py
+├── models/
+│   └── schemas.py               # Veri modelleri (UnifiedPRData, ReviewResult, ReviewIssue)
+├── review_templates/
+│   ├── base.py                  # BaseTemplate abstract class
+│   ├── default.py               # Default (kompakt) template
+│   ├── detailed.py              # Detailed template
+│   ├── executive.py             # Executive template
+│   └── custom.py                # Custom template (placeholder tabanlı)
+├── tools/
+│   └── review_tools.py          # MCP tool tanımları (review_code, analyze_diff, security_scan)
+├── rules/                       # 19 markdown kural dosyası
+├── custom_templates/            # Kullanıcı tanımlı template'ler
+├── ui/                          # React + TypeScript + Vite frontend
+├── tests/                       # Test dosyaları
+└── docker/                      # Docker yapılandırması
+```
+
+ANA BAĞIMLILIKLAR (requirements.txt):
+- mcp: MCP SDK (Model Context Protocol)
+- fastapi: Web framework
+- uvicorn: ASGI sunucu
+- pydantic: Veri validasyonu ve tip güvenliği
+- openai: OpenAI SDK
+- anthropic: Anthropic SDK
+- groq: Groq SDK
+- PyGithub: GitHub API kütüphanesi
+- python-gitlab: GitLab API kütüphanesi
+- atlassian-python-api: Bitbucket/Jira API kütüphanesi
+- azure-devops: Azure DevOps API SDK
+- httpx: HTTP client
+- pyyaml: YAML parser
+- python-dotenv: Ortam değişkenleri
+- unidiff: Unified diff parser
+- structlog: Yapılandırılmış loglama
+- pyjwt: JWT işleme
+- cryptography: Kriptografi
+
+VERİ MODELLERİ:
+
+UnifiedPRData: platform, pr_url, pr_id, repo_full_name, source_branch, target_branch, title, description, author, diff, files_changed, additions, deletions, metadata
+
+ReviewIssue: severity, title, description, file, line, snippet, suggestion, category, owasp_id, cwe_id, threat_type
+
+ReviewResult: summary, score (0-10), issues listesi, approval_recommended, block_merge, ai_slop_detected, ai_slop_count, security_score, security_issues_count, secret_leak_detected, critical_count, high_count, medium_count, low_count
+
+============================================================
+BÖLÜM 19: SAYISAL BÜYÜKLÜK
+============================================================
+
+- Platformlar: 4
+- AI Provider: 3
+- Programlama Dilleri: 25+
+- Kural Dosyaları: 19
+- PR Template: 4 + custom
+- MCP Tool: 3
+- OWASP Kategorisi: 10
+- AI Slop Pattern: 8
+- API Endpoint: 20+
+- UI Sayfası: 4
+- Kaynak Dosya: 40+ (Python) + TypeScript
+- Docker Image: ~150 MB
+- Review Süresi: 5-15 saniye (Groq), 15-30 saniye (OpenAI/Anthropic)
+
+============================================================
+BÖLÜM 20: DEĞER ÖNERİSİ
+============================================================
+
+- Maliyet: Rakiplere göre %70-90 tasarruf
+- Zaman: Manuel review süresi %60-80 azalma
+- Güvenlik: OWASP Top 10 + Secret Leak proaktif tarama
+- AI Kalitesi: Düşük kaliteli AI kodu otomatik tespiti
+- Görünürlük: Dashboard + Analytics ile veri odaklı kararlar
+- Esneklik: 4 platform, 3 AI, 25+ dil, 4 template
+- Gizlilik: Self-hosted, kod asla şirket dışına çıkmaz. GDPR ve KVKK uyumlu.
+
+============================================================
+BÖLÜM 21: ROADMAP (GELİŞİM PLANI)
+============================================================
+
+KISA VADE (Q2 2026):
+- Kategori bazlı model seçimi: Güvenlik → Claude, Compilation → GPT-4, Genel → Groq
+- Persistent analytics: In-memory'den SQLite/PostgreSQL'e geçiş
+- Notification hub: Slack ve Teams entegrasyonu
+
+ORTA VADE (Q3-Q4 2026):
+- IDE eklentileri: VS Code ve IntelliJ için native extension
+- Team-based rules (RBAC): Farklı takımlara farklı kural setleri
+- Akıllı caching ve incremental review: Benzer pattern'leri cache'den çözme
+
+UZUN VADE (2027):
+- Feedback loop: Geliştiriciler AI yorumlarına 👍/👎 verir, sistem öğrenir, false positive azalır
+- Multi-tenant SaaS: Birden fazla organizasyonu tek platformdan destekleme
+
+============================================================
+BÖLÜM 22: SIK SORULAN SORULAR
+============================================================
+
+S: Review ne kadar sürer?
+C: Groq ile 5-15 saniye, OpenAI veya Anthropic ile 15-30 saniye. Diff büyüklüğüne bağlı.
+
+S: AI Slop merge'ü engelliyor mu?
+C: Hayır, kesinlikle engellemez. Tasarım kararı olarak maximum severity MEDIUM. Merge'ü sadece critical seviye sorunlar engeller.
+
+S: Security Deep Scan mevcut SAST araçlarının yerini alır mı?
+C: Tam olarak değil. AI tabanlı tarama geleneksel SAST'tan farklı — bağlamı anlıyor, daha az false positive üretiyor ama rule-based kesinlik açısından geleneksel araçlar da değerli. İkisi birlikte kullanılabilir.
+
+S: Analytics verileri kalıcı mı?
+C: Şu an in-memory tutuluyor, sunucu restart'ta sıfırlanıyor. Roadmap'te persistent storage planlanıyor.
+
+S: Birden fazla repo için tek server yeterli mi?
+C: Evet. Her repoda sadece webhook URL'ini ayarlamak yeterli. Platform farkı da önemli değil — bir repo GitHub'da, diğeri Bitbucket'ta olabilir.
+
+S: Yeni dil desteği nasıl eklenir?
+C: Otomatik. İlk kez yeni dilde PR geldiğinde RuleGenerator AI kullanarak o dile özel kuralları üretir ve kaydeder.
+
+S: AI projenin tamamını mı inceliyor?
+C: Hayır, sadece PR'ın diff'ini inceliyor (ilk 10.000 karakter). Projenin geri kalanı gönderilmez. Bu token maliyeti ve context window limiti nedeniyle bilinçli bir trade-off'tur.
+
+S: Hangi AI provider'ı kullanmalıyız?
+C: Günlük yüksek hacim için Groq (hızlı, ucuz), karmaşık analiz için OpenAI GPT-4o, güvenlik odaklı inceleme için Anthropic Claude 3.5 Sonnet önerilir.
+
+S: Self-hosted olması ne anlama geliyor?
+C: Sistem tamamen kendi sunucunuzda çalışır. Kaynak kodunuz hiçbir 3. parti servise gitmez. GDPR ve KVKK uyumlu bir yapıdır.
+
+S: Docker ile nasıl kurulur?
+C: Tek bir Docker container ile çalışır. Image boyutu ~150 MB. Bir VPS'e deploy edip webhook URL'ini ayarlamak dakikalar alır.
+
+S: Config değişiklikleri için restart gerekir mi?
+C: Hayır. Settings sayfasından veya API ile yapılan tüm değişiklikler anında uygulanır. config.overrides.yaml dosyasına persist edilir.
+
+S: Bu projeyi kim geliştirdi?
+C: Bu proje Mennan Sevim tarafından geliştirilmiştir.
+
+============================================================
+SON
+============================================================
