@@ -6,105 +6,17 @@
     <title>MCP Code Review — AI Asistan</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0f;
-            color: #e0e0e0;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-
-        header {
-            width: 100%;
-            padding: 20px 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 14px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-            background: rgba(255,255,255,0.02);
-        }
-
-        header h1 {
-            font-size: 20px;
-            font-weight: 600;
-            letter-spacing: -0.3px;
-        }
-
-        header h1 span { color: #6366f1; }
-
-        .badge {
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 20px;
-            background: rgba(99, 102, 241, 0.15);
-            color: #818cf8;
-            font-weight: 500;
-        }
-
-        main {
-            flex: 1;
-            width: 100%;
-            max-width: 900px;
-            padding: 24px 16px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .chat-container {
-            flex: 1;
-            border-radius: 16px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: #111118;
-            min-height: 700px;
-        }
-
-        .chat-container iframe {
-            width: 100%;
-            height: 100%;
-            min-height: 700px;
-            border: none;
-        }
-
-        footer {
-            padding: 16px;
-            text-align: center;
-            font-size: 13px;
-            color: #555;
-            border-top: 1px solid rgba(255,255,255,0.04);
-            width: 100%;
-        }
-
-        footer a {
-            color: #6366f1;
-            text-decoration: none;
-        }
+        html, body { height: 100%; overflow: hidden; background: #0a0a0f; }
+        body { display: flex; flex-direction: column; }
+        iframe { flex: 1; width: 100%; border: none; }
     </style>
 </head>
 <body>
-    <header>
-        <h1><span>MCP</span> Code Review — AI Asistan</h1>
-        <span class="badge">v2.0</span>
-    </header>
-
-    <main>
-        <div class="chat-container">
-            <iframe
-                src="https://chat.agoravoice.com.tr/chatbot/j9aOuCp4IBnDgW7s?theme=dark"
-                title="MCP Code Review AI Asistan"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-presentation"
-                allow="microphone">
-            </iframe>
-        </div>
-    </main>
-
-    <footer>
-        <strong>Mennan Sevim</strong> tarafindan gelistirilmistir &middot;
-        <a href="https://github.com/mennansevim/mcp-server" target="_blank">GitHub</a>
-    </footer>
+    <iframe
+        src="https://chat.agoravoice.com.tr/chatbot/j9aOuCp4IBnDgW7s?theme=dark"
+        title="MCP Code Review AI Asistan"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-presentation"
+        allow="microphone">
+    </iframe>
 </body>
 </html>
