@@ -40,6 +40,8 @@ def get_template(template_config: Optional[dict] = None) -> BaseTemplate:
     """
     if template_config is None:
         template_config = {}
+    if isinstance(template_config, str):
+        template_config = {"name": template_config}
 
     name = template_config.get("name", "default").lower().strip()
 

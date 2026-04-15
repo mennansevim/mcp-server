@@ -62,6 +62,23 @@ review:
     # file: "my_team.md"  # Sadece custom template için: custom_templates/ altındaki dosya
     demo_all: false
 
+# Dinamik kural evrimi — review geri bildirimlerine göre repo bazlı kural üretimi
+rule_evolution:
+  enabled: true  # Dinamik kural evrimini aktifleştir
+  auto_evolve: true  # Her N review'den sonra otomatik tetikle
+  trigger_every: 10  # Kaç review'den sonra rule güncellensin
+  max_issues_lookback: 200  # Pattern analizi için son kaç issue'a bakılsın
+  storage:
+    type: "sqlite"  # sqlite — review verisi depolama
+    path: "data/reviews.db"  # SQLite veritabanı yolu
+
+# OWASP Top 10 otomatik güncelleme
+owasp:
+  auto_update: true  # Sunucu başlangıcında ve periyodik güncelleme
+  update_interval_days: 7  # Güncelleme periyodu (gün)
+  source: "github"  # github — OWASP/Top10 reposundan çek
+  github_repo: "OWASP/Top10"  # Kaynak GitHub reposu
+
 # Webhook güvenlik ve timeout ayarları
 webhook:
   verify_signature: true  # Webhook imzasını doğrula

@@ -12,6 +12,7 @@ from typing import Any, Optional
 logger = structlog.get_logger()
 
 RULES_DIR = Path(__file__).parent.parent / "rules"
+REPO_RULES_DIR = RULES_DIR / "repo"
 
 FOCUS_RULE_FILES: dict[str, str] = {
     "compilation": "compilation.md",
@@ -63,14 +64,48 @@ class RulesHelper:
             return p.read_text(encoding="utf-8")
         return None
 
+    def get_repo_rule(self, repo: str) -> Optional[str]:
+        """Read repo-specific rule file from rules/repo/{owner}_{name}.md."""
+        safe_name = repo.replace("/", "_").replace("\\", "_")
+        p = REPO_RULES_DIR / f"{safe_name}.md"
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+        return None
+
+    def get_owasp_rule(self) -> Optional[str]:
+        """Read the dynamic OWASP Top 10 rule file if present."""
+        p = self.rules_dir / "owasp-top10.md"
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+        return None
+
     def resolve_rules(
         self,
         focus_areas: list[str],
         language: Optional[str] = None,
+        repo: Optional[str] = None,
     ) -> dict[str, Any]:
+        """
+        Resolve rule content for a review.
+
+        Priority order (highest first):
+          1. Repo-specific rules  (rules/repo/{owner}_{name}.md)
+          2. Language-specific rules  (rules/{lang}-{category}.md)
+          3. General rules  (rules/{category}.md)
+          4. Dynamic OWASP rules  (rules/owasp-top10.md) — when security is a focus area
+        """
         used_files: list[str] = []
         parts: list[str] = []
 
+        # 1) Repo-specific rules (highest priority)
+        if repo:
+            repo_content = self.get_repo_rule(repo)
+            if repo_content:
+                safe_name = repo.replace("/", "_").replace("\\", "_")
+                used_files.append(f"repo/{safe_name}.md")
+                parts.append(f"\n## REPO-SPECIFIC RULES for {repo}\n{repo_content}")
+
+        # 2-3) Language-specific / general rules
         for area in focus_areas:
             area_l = (area or "").lower()
             base_file = FOCUS_RULE_FILES.get(area_l)
@@ -91,8 +126,17 @@ class RulesHelper:
                 used_files.append(base_file)
                 parts.append(f"\n## Rules for: {area_l.upper()}\n{base_path.read_text(encoding='utf-8')}")
 
+        # 4) Dynamic OWASP rules when security is a focus area
+        security_focus = any(a.lower() in ("security",) for a in focus_areas)
+        if security_focus:
+            owasp_content = self.get_owasp_rule()
+            if owasp_content:
+                used_files.append("owasp-top10.md")
+                parts.append(f"\n## OWASP Top 10 Rules\n{owasp_content}")
+
         return {
             "language": language,
+            "repo": repo,
             "focus_areas": focus_areas,
             "files": used_files,
             "content": "\n\n".join(parts).strip(),

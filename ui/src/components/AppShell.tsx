@@ -16,6 +16,9 @@ export default function AppShell({ children }: AppShellProps) {
           <NavLink to="/analytics" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Analytics
           </NavLink>
+          <NavLink to="/project-review" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Project Review
+          </NavLink>
           <NavLink to="/config" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Settings
           </NavLink>

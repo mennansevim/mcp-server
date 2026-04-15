@@ -4,6 +4,7 @@ import LogsDashboardPage from './routes/LogsDashboardPage'
 import LogDetailPage from './routes/LogDetailPage'
 import ConfigPage from './routes/ConfigPage'
 import AnalyticsPage from './routes/AnalyticsPage'
+import ProjectReviewPage from './routes/ProjectReviewPage'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/logs/:runId" element={<LogDetailPage />} />
         <Route path="/config" element={<ConfigPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/project-review" element={<ProjectReviewPage />} />
         <Route path="*" element={<Navigate to="/logs" replace />} />
       </Routes>
     </AppShell>

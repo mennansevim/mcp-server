@@ -4,14 +4,19 @@ Platform-agnostic AI-powered code review via webhooks and MCP tools
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import fnmatch
 import yaml
+import shutil
 import structlog
+import tempfile
+import zipfile
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
-from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi import FastAPI, Request, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -37,6 +42,10 @@ from services.rules_service import RulesHelper
 from services.live_log_store import LiveLogStore
 from services.ui_logs_config import parse_ui_logs_config
 from services.analytics_store import AnalyticsStore
+from services.review_store import ReviewStore
+from services.feedback_analyzer import FeedbackAnalyzer
+from services.rule_evolver import RuleEvolver
+from services.owasp_updater import OWASPUpdater
 from tools import ReviewTools
 
 
@@ -170,6 +179,17 @@ class CodeReviewServer:
         
         self.diff_analyzer = DiffAnalyzer()
         self.analytics = AnalyticsStore()
+        self.review_store = ReviewStore()
+        self.feedback_analyzer = FeedbackAnalyzer(self.review_store)
+        self.rule_evolver = RuleEvolver(
+            ai_config=ai_config,
+            rules_helper=self.rules_helper,
+            store=self.review_store,
+            analyzer=self.feedback_analyzer,
+        )
+        self.owasp_updater = OWASPUpdater(
+            github_token=os.getenv("GITHUB_TOKEN"),
+        )
       
         self.ui_logs_config = parse_ui_logs_config(self.config)
         self.live_logs = LiveLogStore(max_events_per_run=self.ui_logs_config.max_events_per_poll)
@@ -185,6 +205,11 @@ class CodeReviewServer:
         self.review_tools = ReviewTools(self.ai_reviewer, self.diff_analyzer)
         
         logger.info("code_review_server_initialized")
+        
+        if os.environ.get("MOCK_DATA") == "1":
+            from mock_data import inject_mock_data
+            inject_mock_data(self.live_logs, self.analytics)
+            logger.info("mock_data_injected", runs=len(self.live_logs.list_runs()))
 
     def update_runtime_config(self, updated_config: dict[str, Any]) -> dict[str, Any]:
         global config
@@ -402,6 +427,7 @@ class CodeReviewServer:
                 diff=diff,
                 files_changed=pr_data.files_changed,
                 focus_areas=review_config.get("focus", []),
+                repo=pr_data.repo_full_name,
             )
 
             out("✅ AI Review completed!", step="step_3")
@@ -495,6 +521,26 @@ class CodeReviewServer:
                 author=pr_data.author,
                 platform=pr_data.platform.value,
             )
+            self.review_store.persist_review(
+                review_result,
+                repo=pr_data.repo_full_name,
+                pr_id=str(pr_data.pr_id),
+                platform=pr_data.platform.value,
+                author=pr_data.author,
+            )
+
+            # Auto-evolve repo rules if enough reviews accumulated
+            rule_evo_cfg = self.config.get("rule_evolution", {})
+            if rule_evo_cfg.get("enabled") and rule_evo_cfg.get("auto_evolve"):
+                trigger_every = rule_evo_cfg.get("trigger_every", 10)
+                if self.rule_evolver.should_evolve(pr_data.repo_full_name, trigger_every):
+                    try:
+                        max_lookback = rule_evo_cfg.get("max_issues_lookback", 200)
+                        await self.rule_evolver.evolve(
+                            pr_data.repo_full_name, max_issues=max_lookback
+                        )
+                    except Exception as e:
+                        logger.warning("auto_evolve_failed", repo=pr_data.repo_full_name, error=str(e))
 
             return {
                 "status": "success",
@@ -543,14 +589,45 @@ async def lifespan(app: FastAPI):
         print(f"🧠 Model: {ai_cfg.get('model')}")
     print(f"🔌 Platforms: {', '.join([p.value for p in review_server.adapters.keys()])}")
     print(f"💬 Comment Strategy: {config['review']['comment_strategy']}")
-    tmpl_name = config.get("review", {}).get("template", {}).get("name", "default")
+    tmpl_raw = config.get("review", {}).get("template", {})
+    tmpl_name = tmpl_raw.get("name", "default") if isinstance(tmpl_raw, dict) else str(tmpl_raw)
     print(f"📄 Review Template: {tmpl_name}")
     print(f"🔍 Focus Areas: {', '.join(config['review']['focus'])}")
     print("="*80)
     print("✅ Server ready to receive webhooks!")
     print("="*80 + "\n")
     logger.info("server_starting")
+
+    # OWASP periodic update scheduler
+    owasp_cfg = config.get("owasp", {})
+    _owasp_task = None
+    if owasp_cfg.get("auto_update"):
+        interval_days = owasp_cfg.get("update_interval_days", 7)
+        interval_seconds = interval_days * 86400
+
+        async def _owasp_scheduler():
+            # Initial update on startup
+            try:
+                review_server.owasp_updater.update()
+                logger.info("owasp_initial_update_done")
+            except Exception as e:
+                logger.warning("owasp_initial_update_failed", error=str(e))
+            while True:
+                await asyncio.sleep(interval_seconds)
+                try:
+                    review_server.owasp_updater.update()
+                    logger.info("owasp_scheduled_update_done")
+                except Exception as e:
+                    logger.warning("owasp_scheduled_update_failed", error=str(e))
+
+        _owasp_task = asyncio.create_task(_owasp_scheduler())
+        print(f"📋 OWASP Auto-Update: every {interval_days} day(s)")
+
     yield
+
+    if _owasp_task:
+        _owasp_task.cancel()
+
     print("\n" + "="*80)
     print("🛑 SERVER SHUTTING DOWN")
     print("="*80 + "\n")
@@ -627,6 +704,58 @@ async def rules_get(filename: str):
     if content is None:
         raise HTTPException(status_code=404, detail="Rule not found")
     return {"filename": filename, "content": content}
+
+
+# ── Repo-specific rules & feedback endpoints ────────────────────────────────
+
+@app.get("/api/rules/repo/{repo:path}")
+async def rules_repo_get(repo: str):
+    """Get the current dynamic rule file for a repo."""
+    content = review_server.rule_evolver.get_repo_rule(repo)
+    if content is None:
+        raise HTTPException(status_code=404, detail="No repo-specific rules found")
+    return {"repo": repo, "content": content}
+
+
+@app.post("/api/rules/evolve/{repo:path}")
+async def rules_evolve(repo: str, force: bool = False):
+    """Manually trigger rule evolution for a repo based on feedback data."""
+    result = await review_server.rule_evolver.evolve(repo, force=force)
+    return result
+
+
+@app.get("/api/rules/feedback/{repo:path}")
+async def rules_feedback(repo: str, max_issues: int = 200):
+    """Get feedback analysis report for a repo."""
+    report = review_server.feedback_analyzer.analyze(repo, max_issues=max_issues)
+    return report
+
+
+@app.get("/api/rules/repo-reviews/{repo:path}")
+async def rules_repo_reviews(repo: str, limit: int = 50):
+    """Get stored reviews for a repo."""
+    reviews = review_server.review_store.get_repo_reviews(repo, limit=limit)
+    return {"repo": repo, "count": len(reviews), "reviews": reviews}
+
+
+# ── OWASP management endpoints ─────────────────────────────────────────────
+
+@app.post("/api/owasp/update")
+async def owasp_update(force: bool = False):
+    """Manually trigger OWASP Top 10 rule update."""
+    result = review_server.owasp_updater.update(force=force)
+    return result
+
+
+@app.get("/api/owasp/status")
+async def owasp_status():
+    """Get current OWASP rule version info."""
+    info = review_server.owasp_updater.get_current_version_info()
+    owasp_content = review_server.rules_helper.get_owasp_rule()
+    return {
+        "has_owasp_rules": owasp_content is not None,
+        "last_update": info,
+    }
 
 
 @app.get("/templates")
@@ -828,6 +957,439 @@ async def analytics_recent(limit: int = 20):
     return {"reviews": review_server.analytics.get_recent_reviews(limit)}
 
 
+_project_reviews: dict[str, dict] = {}
+
+REVIEW_EXTENSIONS = {
+    ".py", ".cs", ".java", ".js", ".ts", ".tsx", ".jsx",
+    ".go", ".rs", ".swift", ".kt", ".scala", ".rb", ".php",
+    ".c", ".cpp", ".h", ".hpp", ".dart", ".vue", ".sh",
+    ".json", ".xml", ".yaml", ".yml", ".toml", ".ini",
+    ".csproj", ".sln", ".props", ".targets", ".config",
+    ".css", ".scss", ".less", ".html", ".sql",
+}
+
+_DEFAULT_REVIEWIGNORE = Path(__file__).parent / ".reviewignore"
+
+
+def _parse_reviewignore(text: str) -> list[str]:
+    patterns: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        patterns.append(stripped)
+    return patterns
+
+
+def _load_reviewignore(project_root: Path) -> list[str]:
+    local = project_root / ".reviewignore"
+    if local.is_file():
+        return _parse_reviewignore(local.read_text(encoding="utf-8", errors="ignore"))
+    if _DEFAULT_REVIEWIGNORE.is_file():
+        return _parse_reviewignore(_DEFAULT_REVIEWIGNORE.read_text(encoding="utf-8", errors="ignore"))
+    return []
+
+
+def _is_ignored(rel_path: str, patterns: list[str]) -> bool:
+    rel = rel_path.replace("\\", "/")
+    parts = rel.split("/")
+
+    for pat in patterns:
+        p = pat.rstrip("/")
+        is_dir_pattern = pat.endswith("/")
+
+        if "/" not in p:
+            if is_dir_pattern:
+                if any(fnmatch.fnmatch(part, p) for part in parts[:-1]):
+                    return True
+            else:
+                if fnmatch.fnmatch(parts[-1], p):
+                    return True
+                if any(fnmatch.fnmatch(part, p) for part in parts[:-1]):
+                    return True
+        else:
+            if fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(rel, p + "/**"):
+                return True
+            if is_dir_pattern and fnmatch.fnmatch(rel, p + "*"):
+                return True
+
+    return False
+
+
+def _detect_lang(ext: str) -> str:
+    m = {
+        ".py": "python", ".cs": "csharp", ".java": "java",
+        ".js": "javascript", ".ts": "typescript", ".tsx": "typescript",
+        ".jsx": "javascript", ".go": "go", ".rs": "rust",
+        ".swift": "swift", ".kt": "kotlin", ".scala": "scala",
+        ".rb": "ruby", ".php": "php", ".c": "c", ".cpp": "cpp",
+        ".h": "c", ".hpp": "cpp", ".dart": "dart", ".vue": "vue",
+        ".sh": "shell",
+    }
+    return m.get(ext.lower(), "auto")
+
+
+async def _run_project_review(review_id: str, tmp_dir: str, focus: list[str], provider: str | None, model: str | None, exclude_categories: set[str] | None = None):
+    import time, json as _json
+    project = Path(tmp_dir)
+    rev = _project_reviews[review_id]
+    excl = exclude_categories or set()
+
+    rev["status"] = "scanning"
+    rev["status_message"] = "Dosyalar taranıyor ve sınıflandırılıyor..."
+
+    ignore_patterns = _load_reviewignore(project)
+    files: list[Path] = []
+    skipped_categories: dict[str, int] = {}
+    for f in sorted(project.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = str(f.relative_to(project))
+        if _is_ignored(rel, ignore_patterns):
+            continue
+        if f.suffix.lower() not in REVIEW_EXTENSIONS or f.stat().st_size > 50_000:
+            continue
+        cat = _classify_file(rel, f.suffix)
+        if cat in excl:
+            skipped_categories[cat] = skipped_categories.get(cat, 0) + 1
+            continue
+        files.append(f)
+
+    rev["total_files"] = len(files)
+    rev["status"] = "reviewing"
+    rev["status_message"] = f"{len(files)} dosya bulundu, review başlıyor..."
+    results = []
+    consecutive_errors = 0
+
+    for idx, fpath in enumerate(files):
+        if rev.get("status") == "cancelled":
+            break
+
+        import time as _time
+        rel = str(fpath.relative_to(project))
+        rev["current_file"] = rel
+        rev["current_file_started_at"] = _time.time()
+        rev["reviewed_count"] = idx
+        rev["status_message"] = f"[{idx + 1}/{len(files)}] {rel}"
+
+        code = fpath.read_text(encoding="utf-8", errors="replace")
+        if len(code.strip()) < 10:
+            results.append({"file": rel, "skipped": True, "reason": "empty"})
+            continue
+
+        truncated = len(code) > 10_000
+        if truncated:
+            code = code[:10_000]
+
+        lang = _detect_lang(fpath.suffix)
+        providers_to_try = [provider] if provider else [None]
+        fallback_providers = ["openai", "anthropic", "groq"]
+        for fb in fallback_providers:
+            if fb not in providers_to_try and fb != provider:
+                providers_to_try.append(fb)
+
+        file_result = None
+        last_error = None
+        for prov_attempt in providers_to_try:
+            try:
+                t0 = time.time()
+                review_result = await review_server.ai_reviewer.review_file(
+                    code=code,
+                    file_path=rel,
+                    language=lang,
+                    focus_areas=focus,
+                    provider=prov_attempt,
+                    model=model if prov_attempt == provider else None,
+                )
+                elapsed = round(time.time() - t0, 1)
+                file_result = {
+                    "file": rel,
+                    "language": lang,
+                    "score": review_result.score,
+                    "total_issues": review_result.total_issues,
+                    "truncated": truncated,
+                    "review_time_sec": elapsed,
+                    "issues": [
+                        {
+                            "severity": iss.severity.value,
+                            "title": iss.title,
+                            "description": iss.description,
+                            "category": iss.category,
+                            "suggestion": iss.suggestion,
+                        }
+                        for iss in review_result.issues
+                    ],
+                }
+                break
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        if file_result is None:
+            file_result = {"file": rel, "error": f"Tüm provider'lar başarısız: {(last_error or 'unknown')[:120]}"}
+            consecutive_errors += 1
+        elif file_result.get("error"):
+            consecutive_errors += 1
+        else:
+            consecutive_errors = 0
+
+        results.append(file_result)
+
+        if consecutive_errors >= 5:
+            rev["status"] = "failed"
+            rev["status_message"] = f"Review durduruldu: Art arda {consecutive_errors} dosya hata aldı. Tüm AI provider'lar rate-limited olabilir."
+            break
+
+    reviewed = [r for r in results if not r.get("skipped") and not r.get("error")]
+    errors = [r for r in results if r.get("error")]
+    scores = [r["score"] for r in reviewed if "score" in r]
+    all_issues = [iss for r in reviewed for iss in r.get("issues", [])]
+
+    if rev.get("status") == "cancelled":
+        final_status = "cancelled"
+    elif rev.get("status") == "failed":
+        final_status = "failed"
+    elif len(errors) > len(reviewed):
+        final_status = "failed"
+    else:
+        final_status = "done"
+
+    error_count = len(errors)
+    error_message = None
+    if final_status == "failed":
+        if error_count > 0 and errors[0].get("error", "").startswith("All AI providers"):
+            error_message = "Tüm AI provider'lar rate-limited. Lütfen farklı bir provider seçin veya daha sonra tekrar deneyin."
+        else:
+            error_message = f"{error_count} dosyada hata oluştu ({len(reviewed)} dosya başarıyla review edildi)."
+
+    rev.update({
+        "status": final_status,
+        "status_message": error_message or rev.get("status_message"),
+        "reviewed_count": len(results),
+        "current_file": None,
+        "results": results,
+        "summary": {
+            "total_files": len(files),
+            "reviewed": len(reviewed),
+            "skipped": sum(1 for r in results if r.get("skipped")),
+            "errors": error_count,
+            "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+            "total_issues": len(all_issues),
+            "critical": sum(1 for i in all_issues if i.get("severity") == "critical"),
+            "high": sum(1 for i in all_issues if i.get("severity") == "high"),
+            "medium": sum(1 for i in all_issues if i.get("severity") == "medium"),
+            "low": sum(1 for i in all_issues if i.get("severity") == "low"),
+        },
+    })
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+_AUTO_GENERATED_PATTERNS = {
+    "migrations", "migration", "Migrations",
+    "designer.cs", ".designer.cs", ".generated.cs", ".g.cs", ".g.i.cs",
+    "assemblyinfo.cs", "globalusings.g.cs",
+    "reference.cs", "service.reference",
+}
+_AUTO_GENERATED_DIRS = {
+    "Migrations", "migrations", "Generated", "generated",
+    "wwwroot", "Properties",
+}
+_TEST_PATTERNS = {"test", "tests", "Test", "Tests", "Spec", "spec", "Specs", "specs", "__tests__", "__test__"}
+_BOILERPLATE_FILES = {
+    "program.cs", "startup.cs", "globalusings.cs",
+    "appsettings.json", "appsettings.development.json",
+    "launchsettings.json",
+}
+_CONFIG_EXTENSIONS = {".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".config", ".csproj", ".sln", ".props", ".targets"}
+
+
+def _classify_file(rel: str, ext: str) -> str:
+    rel_lower = rel.lower()
+    parts_lower = [p.lower() for p in Path(rel).parts]
+
+    if any(d.lower() in parts_lower for d in _AUTO_GENERATED_DIRS):
+        return "auto_generated"
+    if any(pat in rel_lower for pat in _AUTO_GENERATED_PATTERNS):
+        return "auto_generated"
+
+    if any(t in parts_lower for t in _TEST_PATTERNS):
+        return "test"
+    if rel_lower.endswith("tests.cs") or rel_lower.endswith("test.cs") or rel_lower.endswith(".spec.ts") or rel_lower.endswith(".test.ts") or rel_lower.endswith("_test.py") or rel_lower.endswith("_test.go"):
+        return "test"
+
+    if Path(rel).name.lower() in _BOILERPLATE_FILES:
+        return "boilerplate"
+
+    if ext.lower() in _CONFIG_EXTENSIONS:
+        return "config"
+
+    return "source"
+
+
+@app.post("/api/project-review/plan")
+async def project_review_plan(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(400, "Only .zip files are accepted")
+
+    tmp_dir = tempfile.mkdtemp(prefix="proj_plan_")
+    try:
+        contents = await file.read()
+        zip_path = Path(tmp_dir) / "upload.zip"
+        zip_path.write_bytes(contents)
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(tmp_dir)
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "Invalid ZIP file")
+        zip_path.unlink()
+
+        project = Path(tmp_dir)
+        ignore_patterns = _load_reviewignore(project)
+        files = []
+        ignored_count = 0
+        for f in sorted(project.rglob("*")):
+            if not f.is_file():
+                continue
+            rel = str(f.relative_to(project))
+            if _is_ignored(rel, ignore_patterns):
+                ignored_count += 1
+                continue
+            if f.suffix.lower() not in REVIEW_EXTENSIONS:
+                continue
+            if f.stat().st_size > 50_000:
+                continue
+            category = _classify_file(rel, f.suffix)
+            files.append({
+                "file": rel,
+                "language": _detect_lang(f.suffix),
+                "size": f.stat().st_size,
+                "category": category,
+            })
+
+        categories = {}
+        for fi in files:
+            cat = fi["category"]
+            categories[cat] = categories.get(cat, 0) + 1
+
+        return {
+            "files": files,
+            "total": len(files),
+            "categories": categories,
+            "ignored_by_reviewignore": ignored_count,
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.post("/api/project-review/upload")
+async def project_review_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    focus: str = Form("security,bugs,performance,compilation"),
+    provider: str = Form(None),
+    model: str = Form(None),
+    exclude_categories: str = Form("auto_generated,config"),
+):
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(400, "Only .zip files are accepted")
+
+    import uuid
+    review_id = uuid.uuid4().hex[:12]
+    tmp_dir = tempfile.mkdtemp(prefix=f"proj_review_{review_id}_")
+
+    contents = await file.read()
+    zip_path = Path(tmp_dir) / "upload.zip"
+    zip_path.write_bytes(contents)
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+    except zipfile.BadZipFile:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(400, "Invalid ZIP file")
+
+    zip_path.unlink()
+
+    focus_list = [f.strip() for f in focus.split(",") if f.strip()]
+    prov = provider if provider and provider != "null" else None
+    mod = model if model and model != "null" else None
+
+    # Pre-flight: test AI provider before starting
+    try:
+        test_providers = [prov] if prov else [None]
+        fallback = ["openai", "anthropic", "groq"]
+        for fb in fallback:
+            if fb not in test_providers:
+                test_providers.append(fb)
+
+        test_ok = False
+        for tp in test_providers:
+            try:
+                review_server.ai_reviewer.router.chat(
+                    system="You are a test.",
+                    user="Reply with only: OK",
+                    provider_override=tp,
+                    model_override=None,
+                )
+                test_ok = True
+                break
+            except Exception:
+                continue
+
+        if not test_ok:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(
+                503,
+                "AI provider'lara ulaşılamıyor. Groq rate-limit aşılmış olabilir, "
+                "OpenAI/Anthropic key'leri geçersiz. Lütfen .env dosyasında geçerli bir API key olduğundan emin olun."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(503, f"AI provider testi başarısız: {e}")
+
+    import time as _time
+    _project_reviews[review_id] = {
+        "id": review_id,
+        "filename": file.filename,
+        "status": "extracting",
+        "status_message": "ZIP dosyası açılıyor...",
+        "total_files": 0,
+        "reviewed_count": 0,
+        "current_file": None,
+        "current_file_started_at": None,
+        "started_at": _time.time(),
+        "results": [],
+        "summary": None,
+    }
+
+    excl = set(c.strip() for c in exclude_categories.split(",") if c.strip()) if exclude_categories else set()
+    background_tasks.add_task(_run_project_review, review_id, tmp_dir, focus_list, prov, mod, excl)
+    return {"review_id": review_id}
+
+
+@app.get("/api/project-review/{review_id}")
+async def project_review_status(review_id: str):
+    if review_id not in _project_reviews:
+        raise HTTPException(404, "Review not found")
+    return _project_reviews[review_id]
+
+
+@app.post("/api/project-review/{review_id}/cancel")
+async def project_review_cancel(review_id: str):
+    if review_id not in _project_reviews:
+        raise HTTPException(404, "Review not found")
+    _project_reviews[review_id]["status"] = "cancelled"
+    return {"status": "cancelled"}
+
+
+@app.get("/api/project-review")
+async def project_review_list():
+    return {"reviews": list(_project_reviews.values())}
+
+
 @app.post("/webhook")
 async def webhook_endpoint(request: Request):
     """
@@ -846,31 +1408,45 @@ async def webhook_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+if MCP_AVAILABLE:
+    _mcp_server = MCPServer("code-review-server")
+    _mcp_sse_transport = SseServerTransport("/mcp/messages")
+
+    @_mcp_server.list_tools()
+    async def _mcp_list_tools() -> list[Tool]:
+        return review_server.review_tools.get_tools()
+
+    @_mcp_server.call_tool()
+    async def _mcp_call_tool(name: str, arguments: dict) -> list[TextContent]:
+        result = await review_server.review_tools.execute_tool(name, arguments)
+        return [TextContent(type="text", text=result)]
+
+
 @app.get("/mcp/sse")
 async def mcp_sse_endpoint(request: Request):
-    """
-    MCP Server-Sent Events endpoint for MCP clients
-    """
+    """MCP Server-Sent Events endpoint for MCP clients"""
     if not MCP_AVAILABLE:
         raise HTTPException(status_code=503, detail="MCP SDK is not installed in this environment")
 
-    # Create MCP server
-    mcp_server = MCPServer("code-review-server")
-    
-    # Register MCP tools
-    @mcp_server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return review_server.review_tools.get_tools()
-    
-    @mcp_server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        result = await review_server.review_tools.execute_tool(name, arguments)
-        return [TextContent(type="text", text=result)]
-    
-    # Create SSE transport
-    async with SseServerTransport("/mcp/messages") as transport:
-        await mcp_server.connect(transport)
-        await transport.handle_sse(request)
+    async with _mcp_sse_transport.connect_sse(
+        request.scope, request.receive, request._send
+    ) as streams:
+        await _mcp_server.run(
+            streams[0],
+            streams[1],
+            _mcp_server.create_initialization_options(),
+        )
+
+
+@app.post("/mcp/messages")
+async def mcp_messages_endpoint(request: Request):
+    """MCP message endpoint — receives JSON-RPC messages from MCP clients"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(status_code=503, detail="MCP SDK is not installed in this environment")
+
+    await _mcp_sse_transport.handle_post_message(
+        request.scope, request.receive, request._send
+    )
 
 
 if __name__ == "__main__":

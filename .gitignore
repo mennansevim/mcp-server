@@ -121,3 +121,11 @@ config.overrides.yaml
 # CI/CD
 # ============================================
 .github/workflows/*.tmp
+
+# ============================================
+# Dynamic Data (auto-generated, not committed)
+# ============================================
+data/
+rules/repo/
+rules/owasp-top10.md
+rules/owasp-top10.*.bak.md

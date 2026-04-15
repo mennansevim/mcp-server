@@ -94,52 +94,11 @@ Files changed:
    - Are there edge cases not handled?
    - Could this cause runtime errors?
 
-3. **SECURITY DEEP SCAN** — Perform a thorough security analysis using OWASP Top 10 framework:
-   
-   **A1 — Injection** (SQL, NoSQL, OS command, LDAP injection):
-   - String concatenation/interpolation in queries → CRITICAL
-   - User input passed to system commands → CRITICAL
-   - Template injection (SSTI) → HIGH
-   
-   **A2 — Broken Authentication**:
-   - Hardcoded credentials, weak password policies → CRITICAL
-   - Missing brute-force protection → HIGH
-   - Session fixation vulnerabilities → HIGH
-   
-   **A3 — Sensitive Data Exposure**:
-   - PII/credentials logged or returned in responses → CRITICAL
-   - Missing encryption for sensitive data at rest/transit → HIGH
-   - Overly verbose error messages exposing internals → MEDIUM
-   
-   **A4 — XML External Entities (XXE)**:
-   - XML parsing without disabling external entities → HIGH
-   
-   **A5 — Broken Access Control**:
-   - Missing authorization checks on endpoints → HIGH
-   - IDOR (Insecure Direct Object Reference) → HIGH
-   - Path traversal vulnerabilities → CRITICAL
-   
-   **A6 — Security Misconfiguration**:
-   - Debug mode enabled in production config → HIGH
-   - Default credentials or accounts → CRITICAL
-   - CORS wildcard (*) on sensitive endpoints → MEDIUM
-   
-   **A7 — Cross-Site Scripting (XSS)**:
-   - innerHTML with unsanitized input → HIGH
-   - Reflected/stored XSS patterns → HIGH
-   
-   **A8 — Insecure Deserialization**:
-   - BinaryFormatter, pickle, eval() on untrusted data → CRITICAL
-   - JSON deserialization without type validation → MEDIUM
-   
-   **A9 — Known Vulnerable Components**:
-   - Deprecated/insecure library usage patterns → MEDIUM
-   - Known insecure function calls (e.g., MD5 for hashing) → HIGH
-   
-   **A10 — Insufficient Logging**:
-   - Security events not logged (login failures, access denied) → LOW
-   - Missing audit trail for sensitive operations → MEDIUM
-   
+3. **SECURITY DEEP SCAN** — Perform a thorough security analysis using OWASP Top 10 framework.
+   Apply the OWASP Top 10 rules provided in the SPECIFIC RULES section below (if present).
+   At minimum check for: Injection, Broken Auth, Sensitive Data Exposure, XXE, Broken Access Control,
+   Security Misconfiguration, XSS, Insecure Deserialization, Vulnerable Components, Insufficient Logging.
+
    **SECRET LEAK DETECTION** — Scan for exposed secrets in code:
    - API keys, tokens, passwords in source code → CRITICAL
    - Connection strings with embedded credentials → CRITICAL
@@ -149,7 +108,7 @@ Files changed:
    For each security issue, include:
    - `category`: "security"
    - `threat_type`: one of "injection", "broken_auth", "sensitive_data", "xxe", "broken_access", "misconfig", "xss", "deserialization", "vulnerable_deps", "insufficient_logging", "secret_leak"
-   - `owasp_id`: e.g. "A1", "A2", ... "A10"
+   - `owasp_id`: e.g. "A01", "A02", ... "A10"
    - `cwe_id`: if known (e.g. "CWE-89" for SQL injection)
 
 4. **CODE QUALITY**:
@@ -276,9 +235,9 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
             primary_provider=self.router.primary,
         )
     
-    def _load_rules(self, focus_areas: List[str], language: Optional[str] = None) -> str:
+    def _load_rules(self, focus_areas: List[str], language: Optional[str] = None, repo: Optional[str] = None) -> str:
         """Load relevant rules from local rule files."""
-        result = self.rules_helper.resolve_rules(focus_areas, language=language)
+        result = self.rules_helper.resolve_rules(focus_areas, language=language, repo=repo)
         content = result.get("content", "")
         files = result.get("files", [])
 
@@ -297,6 +256,7 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
         *,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        repo: Optional[str] = None,
     ) -> ReviewResult:
         """
         Review code changes using AI
@@ -331,8 +291,8 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                         force_regenerate=False  # Mevcut dosyaları yeniden oluşturma
                     )
             
-            # Load relevant rules (dil tespit edildiyse dile özel)
-            rules = self._load_rules(focus_areas, language=detected_language)
+            # Load relevant rules (dil tespit edildiyse dile özel, repo varsa repo-spesifik)
+            rules = self._load_rules(focus_areas, language=detected_language, repo=repo)
             
             # Build enhanced prompt with rules
             prompt_parts = [
@@ -471,6 +431,192 @@ Be EXTREMELY CRITICAL and THOROUGH. Check every line of the diff. Better to flag
                 issues=[],
                 approval_recommended=False,
                 block_merge=True
+            )
+
+    FILE_REVIEW_PROMPT = """You are an expert code reviewer performing a FULL FILE ANALYSIS (not a diff review).
+Analyze the ENTIRE source code below for issues. This is a standalone file from a project — review it thoroughly.
+
+**File:** {file_path}
+**Language:** {language}
+**Focus areas:** {focus_areas}
+
+```{language}
+{code}
+```
+
+**WHAT TO LOOK FOR:**
+
+1. **SECURITY (OWASP Top 10):**
+   - SQL/NoSQL injection, command injection
+   - Hardcoded credentials, API keys, secrets in code
+   - XSS vulnerabilities, insecure deserialization
+   - Missing authentication/authorization checks
+   - Path traversal, SSRF
+   - Insecure cryptography (MD5, SHA1 for passwords)
+
+2. **CODE SMELLS & QUALITY:**
+   - God classes / methods (too many responsibilities)
+   - Deep nesting (3+ levels)
+   - Magic numbers/strings without constants
+   - Dead code, unreachable code
+   - Missing null/error handling
+   - Inconsistent naming conventions
+   - Code duplication patterns
+   - Missing input validation
+
+3. **AI SLOP DETECTION:**
+   - Redundant comments that restate code (`// Initialize the variable`)
+   - Generic placeholder names (`data`, `result`, `temp`, `item`, `value`)
+   - Copy-paste boilerplate that should be refactored
+   - Catch-all exception handling without specific recovery
+   - TODO/FIXME placeholders left as unfinished scaffolding
+   - Inconsistent patterns in the same file
+
+4. **BUGS & RELIABILITY:**
+   - Potential null reference exceptions
+   - Resource leaks (unclosed streams, connections)
+   - Race conditions, thread safety issues
+   - Off-by-one errors
+   - Incorrect error handling
+
+5. **PERFORMANCE:**
+   - N+1 query patterns
+   - Unnecessary allocations in loops
+   - Missing async/await for I/O
+   - Inefficient algorithms (O(n²) when O(n) possible)
+
+**IMPORTANT:** Be CRITICAL and THOROUGH. This is a real project — find real issues.
+Do NOT say "everything looks fine" unless the code is truly exemplary.
+Most production code has at least 2-3 issues.
+
+Provide your review in JSON format:
+{{
+    "summary": "Brief summary of findings for this file",
+    "score": 7,
+    "ai_slop_detected": false,
+    "security_score": 8,
+    "issues": [
+        {{
+            "severity": "high",
+            "title": "Missing input validation",
+            "description": "User input is used directly without validation...",
+            "file_path": "{file_path}",
+            "line_number": 42,
+            "code_snippet": "relevant code here",
+            "suggestion": "Add input validation...",
+            "category": "security"
+        }}
+    ],
+    "approval_recommended": true,
+    "block_merge": false
+}}
+
+**Rules:**
+- severity: "critical", "high", "medium", "low", "info" (lowercase only)
+- category: "security", "bugs", "performance", "code_quality", "best_practices", "compilation", "ai_slop", "style"
+- AI Slop severity: max "medium", never "critical" or "high"
+- Be specific: include line numbers and code snippets when possible
+"""
+
+    async def review_file(
+        self,
+        code: str,
+        file_path: str,
+        language: str,
+        focus_areas: List[str],
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> ReviewResult:
+        """Review a standalone file (not a diff)."""
+        try:
+            rules = self._load_rules(focus_areas, language=language)
+
+            prompt_parts = [
+                self.FILE_REVIEW_PROMPT.format(
+                    file_path=file_path,
+                    language=language,
+                    code=code[:10000],
+                    focus_areas=", ".join(focus_areas),
+                )
+            ]
+
+            if rules:
+                prompt_parts.append("\n---\n## SPECIFIC RULES TO FOLLOW:\n")
+                prompt_parts.append(rules[:15000])
+                prompt_parts.append("\n---\nApply these rules strictly.")
+
+            prompt = "\n".join(prompt_parts)
+
+            logger.info("requesting_file_review", file=file_path, language=language)
+
+            system_msg = "You are an expert code reviewer performing thorough file-level analysis."
+            provider_used, model_used, response = self.router.chat(
+                system=system_msg,
+                user=prompt,
+                provider_override=provider,
+                model_override=model,
+            )
+            self.last_provider_used = provider_used
+            self.last_model_used = model_used
+
+            review_data = self._parse_ai_response(response)
+
+            normalized_issues = []
+            for issue in review_data.get("issues", []):
+                if "severity" in issue:
+                    severity = issue["severity"]
+                    if isinstance(severity, str):
+                        severity_map = {
+                            "critical": "critical", "high": "high", "medium": "medium",
+                            "low": "low", "info": "info", "information": "info",
+                            "minor": "low", "major": "high",
+                        }
+                        issue["severity"] = severity_map.get(severity.lower(), severity.lower())
+
+                if issue.get("category") == "ai_slop" and issue.get("severity") in ("critical", "high"):
+                    issue["severity"] = "medium"
+
+                if not issue.get("file_path"):
+                    issue["file_path"] = file_path
+
+                normalized_issues.append(issue)
+
+            known_issue_fields = {
+                "severity", "title", "description", "file_path", "line_number",
+                "line_end", "code_snippet", "suggestion", "category",
+                "owasp_id", "cwe_id", "threat_type",
+            }
+            clean_issues = [{k: v for k, v in iss.items() if k in known_issue_fields} for iss in normalized_issues]
+
+            ai_slop_issues = [i for i in normalized_issues if i.get("category") == "ai_slop"]
+
+            result = ReviewResult(
+                summary=review_data.get("summary", "File review completed"),
+                score=review_data.get("score", 7),
+                issues=[ReviewIssue(**iss) for iss in clean_issues],
+                approval_recommended=review_data.get("approval_recommended", True),
+                block_merge=review_data.get("block_merge", False),
+                ai_slop_detected=review_data.get("ai_slop_detected", False) or len(ai_slop_issues) > 0,
+            )
+
+            logger.info("file_review_completed", file=file_path, score=result.score, issues=result.total_issues)
+            return result
+
+        except Exception as e:
+            err_str = str(e)
+            is_api_error = any(code in err_str for code in ("429", "401", "403", "500", "502", "503"))
+            is_rate_limit = "rate_limit" in err_str.lower()
+            if is_api_error or is_rate_limit:
+                logger.warning("file_review_provider_error", file=file_path, error=err_str[:200])
+                raise
+            logger.exception("file_review_failed", file=file_path, error=err_str)
+            return ReviewResult(
+                summary=f"Review failed: {e}",
+                score=0,
+                issues=[],
+                approval_recommended=False,
+                block_merge=True,
             )
 
     def _build_chat_request(self, system: str, user: str, model: str):

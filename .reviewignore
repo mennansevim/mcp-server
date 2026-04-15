@@ -1,0 +1,138 @@
+# ============================================================
+# .reviewignore — AI Code Review tarafından atlanacak dosyalar
+# .gitignore syntax'ı ile aynı kuralları kullanır
+# ============================================================
+
+# ─── Build Outputs ───
+bin/
+obj/
+dist/
+build/
+out/
+Debug/
+Release/
+publish/
+artifacts/
+
+# ─── Package / Dependency Managers ───
+node_modules/
+packages/
+vendor/
+.nuget/
+bower_components/
+
+# ─── Virtual Environments ───
+.venv/
+venv/
+env/
+__pycache__/
+
+# ─── IDE / Editor ───
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.swp
+*.swo
+*~
+
+# ─── Source Control ───
+.git/
+.svn/
+.hg/
+
+# ─── Auto-Generated Code ───
+Migrations/
+migrations/
+Generated/
+*.designer.cs
+*.Designer.cs
+*.generated.cs
+*.g.cs
+*.g.i.cs
+AssemblyInfo.cs
+GlobalUsings.g.cs
+Reference.cs
+*.AssemblyAttributes.cs
+
+# ─── Test Results / Coverage ───
+TestResults/
+coverage/
+*.trx
+lcov.info
+.nyc_output/
+
+# ─── Config & Metadata ───
+appsettings.json
+appsettings.*.json
+launchSettings.json
+*.csproj
+*.sln
+*.props
+*.targets
+*.fsproj
+*.vbproj
+web.config
+nuget.config
+package.json
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+tsconfig.json
+tsconfig.*.json
+.eslintrc*
+.prettierrc*
+.editorconfig
+Dockerfile
+docker-compose*.yml
+Makefile
+*.toml
+*.ini
+
+# ─── Static Assets / Non-Code ───
+wwwroot/
+public/
+static/
+assets/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.mp4
+*.mp3
+*.pdf
+
+# ─── Logs & Temp ───
+logs/
+tmp/
+temp/
+*.log
+
+# ─── Boilerplate ───
+Program.cs
+Startup.cs
+
+# ─── CI/CD ───
+.github/
+.gitlab-ci.yml
+.circleci/
+Jenkinsfile
+azure-pipelines.yml
+
+# ─── Terraform / IaC ───
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# ─── Documentation ───
+docs/
+*.md
+LICENSE*
+CHANGELOG*
